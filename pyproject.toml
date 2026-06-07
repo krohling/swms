@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "swm"
+version = "0.1.0"
+description = "Code to Evaluate Semantic World Models"
+readme = "README.md"
+requires-python = "==3.10.*"
+authors = [
+    { name = "Jacob Berg", email = "jacob33@cs.washington.edu" },
+]
+urls = { Homepage = "https://weirdlabuw.github.io/swm" }
+
+dependencies = [
+    "torch>=2.4.0",
+    "torchvision",
+    "transformers==4.57.1",
+    "numpy>=1.20.0,<2",
+    "huggingface-hub>=0.19.0",
+    "Pillow",
+    "diffusers",
+    "language-table",
+    "ogbench",
+    "mediapy",
+    "h5py",
+    "hydra-core",
+    "tensorflow-probability==0.23.0",
+    "tensorflow==2.18.0",
+    "ml-dtypes==0.4.1",
+    "jax==0.4.38",
+    "jaxlib==0.4.38",
+    "tf-keras==2.18.0",
+    "imageio[ffmpeg]",
+    "sentencepiece",
+    "accelerate",
+    "tf-agents>=0.19.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["swm"]
+
+[tool.uv]
+# tf-agents 0.19.0 over-pins typing-extensions==4.5.0, which forces
+# uv to downgrade torch below 2.2 and breaks transformers 4.57.x
+# (uses the public `torch.utils._pytree.register_pytree_node` added in 2.2).
+# Override the pin so the resolver can pick a modern torch.
+override-dependencies = [
+    "typing-extensions>=4.8",
+]
+
+[tool.uv.sources]
+language-table = { git = "https://github.com/JacobB33/language-table.git" }
+ogbench = { git = "https://github.com/JacobB33/ogbench.git" }

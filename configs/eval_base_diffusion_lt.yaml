@@ -1,0 +1,64 @@
+# Example evaluation sweep (LangTable).
+#
+# This config assumes checkpoints are present at the repo root (downloaded via
+# `ckpts/download_checkpoints.sh`), in directories named:
+#   - `paligemma_wm_lt/`
+#   - `lt_base_diffusion/`
+
+name: "langtable"
+
+# CUDA device to run on, e.g. "cuda:0", "cuda:1", or "cpu".
+device: "cuda:0"
+
+# Force deterministic CUDA kernels (cuBLAS / cuDNN)
+deterministic: true
+
+paths:
+  root_save_path: "${hydra:runtime.cwd}/outputs"
+  model_ckpt_path: "${hydra:runtime.cwd}/ckpts/paligemma_wm_lt"
+  processor_path: "${paths.model_ckpt_path}"
+
+# Seed configuration (same range applied to every task)
+seed_start: 6000
+num_seeds: 50
+env_type: "lang_table"
+
+goal_type: "block_to_block"
+
+# One entry per (block_combo, diffusion_path) pairing. The eval script iterates
+# over this list, running `num_seeds` evaluations per task.
+tasks:
+  - block_combo: ["green_cube", "blue_moon"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/lt_base_diffusion/green_cube_blue_moon.pt"
+  - block_combo: ["red_moon", "green_star"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/lt_base_diffusion/red_moon_green_star.pt"
+  - block_combo: ["red_pentagon", "blue_moon"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/lt_base_diffusion/red_pentagon_blue_moon.pt"
+  - block_combo: ["yellow_pentagon", "red_moon"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/lt_base_diffusion/yellow_pentagon_red_moon.pt"
+  - block_combo: ["yellow_star", "blue_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/lt_base_diffusion/yellow_star_blue_cube.pt"
+planning:
+  planning_name: "base_diffusion"
+
+  diffusion: false
+  mppi: false
+  gradient: false
+  expert_diffusion: true
+
+  num_steps: 60
+  num_actions_executed: 2
+  action_skip: 8
+  pred_horizon: 16
+  num_samples: 1
+  num_planning_iters: 10
+
+  gradient_lr: 0.02
+  gradient_clipping_value: 1.0
+
+  mppi_temperature: 1.0
+
+model_batch_size: 64
+action_dim: 2
+
+intermediate_hm: false

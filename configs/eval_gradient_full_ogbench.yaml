@@ -1,0 +1,62 @@
+# Example evaluation sweep (OGBench).
+#
+# This config assumes checkpoints are present at the repo root (downloaded via
+# `ckpts/download_checkpoints.sh`), in directories named:
+#   - `paligemma_wm_ogbench/`
+#   - `ogbench_base_diffusion/`
+
+name: "ogbench"
+
+# CUDA device to run on, e.g. "cuda:0", "cuda:1", or "cpu".
+device: "cuda:0"
+
+# Force deterministic CUDA kernels (cuBLAS / cuDNN)
+deterministic: true
+
+paths:
+  root_save_path: "${hydra:runtime.cwd}/outputs"
+  model_ckpt_path: "${hydra:runtime.cwd}/ckpts/paligemma_wm_ogbench"
+  processor_path: "${paths.model_ckpt_path}"
+
+# Seed configuration (same range applied to every task)
+env_type: "ogbench"
+seed_start: 6000
+num_seeds: 50
+
+goal_type: "stack_blocks"
+
+# One entry per (block_combo, diffusion_path) pairing. The eval script iterates
+# over this list, running `num_seeds` evaluations per task.
+tasks:
+  - block_combo: ["blue_cube", "green_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt"
+  - block_combo: ["blue_cube", "yellow_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/blue_cube_yellow_cube.pt"
+  - block_combo: ["yellow_cube", "red_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/yellow_cube_red_cube.pt"
+
+planning:
+  planning_name: "gradient_full"
+
+  diffusion: true
+  mppi: false
+  gradient: true
+  expert_diffusion: false
+
+  num_steps: 50
+  num_actions_executed: 4
+  action_skip: 8
+  pred_horizon: 16
+  num_samples: 1
+  num_planning_iters: 20
+
+  gradient_lr: .2
+  gradient_clipping_value: 10.0
+
+  mppi_temperature: 1.0
+
+model_batch_size: 64
+action_dim: 5
+
+
+intermediate_hm: false
