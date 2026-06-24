@@ -1,0 +1,8 @@
+# OOD variant: OGBench SWM gradient planning on out-of-distribution scenes.
+# Same tasks + checkpoints as in-distribution; ood=true passes through to the cube env.
+# Maps to the paper's Table 4 (OOD), SWM column. (added by setup tooling)
+defaults:
+  - eval_gradient_full_ogbench
+  - _self_
+
+ood: true

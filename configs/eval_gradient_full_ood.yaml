@@ -1,0 +1,8 @@
+# OOD variant: LangTable SWM gradient planning on out-of-distribution scenes (NOVEL_8 blocks).
+# Same tasks + checkpoints as in-distribution; ood=true flips the env to novel block variants.
+# Maps to the paper's Table 4 (OOD), SWM column. (added by setup tooling)
+defaults:
+  - eval_gradient_full
+  - _self_
+
+ood: true

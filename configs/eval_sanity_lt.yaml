@@ -1,0 +1,15 @@
+# Phase B sanity config (added by setup tooling, safe to delete).
+# Composes the full LangTable gradient_full eval, then narrows it to ONE task and
+# ONE seed to validate the pipeline end-to-end and measure per-seed wall-clock
+# before committing to the full sweep. Run via:
+#   python scripts/evaluate_swm_hydra.py --config-name eval_sanity_lt
+defaults:
+  - eval_gradient_full
+  - _self_
+
+num_seeds: 1
+
+# Single task: green_cube -> blue_moon (first task from eval_gradient_full.yaml).
+tasks:
+  - block_combo: ["green_cube", "blue_moon"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/lt_base_diffusion/green_cube_blue_moon.pt"

@@ -1,0 +1,18 @@
+# Phase B OGBench sanity config (added by setup tooling, safe to delete).
+# Composes the full OGBench gradient_full eval, narrows to ONE task / ONE seed to
+# validate the mujoco/OGBench pipeline (esp. headless rendering) before the full sweep.
+# Writes to a separate output dir so it doesn't touch the LangTable full results.
+#   python scripts/evaluate_swm_hydra.py --config-name eval_sanity_ogbench
+defaults:
+  - eval_gradient_full_ogbench
+  - _self_
+
+num_seeds: 1
+
+paths:
+  root_save_path: "${hydra:runtime.cwd}/outputs_sanity_ogbench"
+
+# Single task: blue_cube -> green_cube (first task from eval_gradient_full_ogbench.yaml).
+tasks:
+  - block_combo: ["blue_cube", "green_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt"

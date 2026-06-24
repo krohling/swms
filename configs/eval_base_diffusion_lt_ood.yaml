@@ -1,0 +1,7 @@
+# OOD variant: LangTable BASE policy (expert diffusion, no WM) on out-of-distribution scenes.
+# Maps to the paper's Table 4 (OOD), Base Policy column. (added by setup tooling)
+defaults:
+  - eval_base_diffusion_lt
+  - _self_
+
+ood: true

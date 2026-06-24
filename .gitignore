@@ -165,3 +165,5 @@ wandb/
 tensorboard/
 
 uv.lock
+# Per-run reproduction output directories
+outputs_*/

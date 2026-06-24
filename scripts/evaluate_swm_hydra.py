@@ -101,7 +101,7 @@ def run_evaluation(cfg: DictConfig):
 
             reward_kwargs = {
                 "block_combo": block_combo,
-                "ood": False,
+                "ood": cfg.get("ood", False),
             }
 
             success, time_taken = eval(
