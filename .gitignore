@@ -167,3 +167,9 @@ tensorboard/
 uv.lock
 # Per-run reproduction output directories
 outputs_*/
+
+# local working docs (not part of the fork)
+docs/
+
+# our source lives under swm-next/ (the data/ rule above is for datasets)
+!swm-next/data/
