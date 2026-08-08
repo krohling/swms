@@ -1,0 +1,43 @@
+# DinoWM predictor, cosine arm — SWM repro recipe with the model substituted.
+# Data, sampling, schedule, optimizer bounds and evaluation match
+# configs/repro.yaml; only the model block and learning_rate differ.
+run_name: dinowm-cosine-64m-v1
+out_dir: /scratch/cluster/krohling/swm-next/runs/dinowm-cosine-64m-v1
+
+# data — identical to the reproduction (corrected SAQA HDF5s)
+noisy_hdf5: /scratch/cluster/krohling/swm-next/data/noisy.hdf5
+play_hdf5:  /scratch/cluster/krohling/swm-next/data/play.hdf5
+val_frac: 0.1                  # same held-out trajectories as repro.yaml
+
+# model — the substitution: frozen Qwen3-VL ViT + 64M OneShotPredictor
+model_id: Qwen/Qwen3-VL-8B-Instruct
+output_stage: pre_merger
+image_size: 224                # recipe resolution (PaliGemma is 224)
+action_dim: 5                  # A.3.1
+max_horizon: 20                # A.3.2: horizons sampled 0-20 (h=0 included)
+obs_horizon: 2                 # DinoWM architecture: two-frame history
+depth: 6                       # 64M predictor
+heads: 16
+mlp_dim: 2048
+dropout: 0.1
+objective: cosine
+cos_weight: 0.0                # unused for the cosine objective
+
+# training — recipe protocol (A.1/A.2); only the LR is model-specific
+max_steps: 64000
+effective_batch: 96
+micro_batch: 96                # A100 probe: bs=96 fits, 39.1 samples/s
+learning_rate: 5.0e-4          # upstream DinoWM predictor_lr (not the VLM 1e-5)
+max_grad_norm: 1.0             # explicit, mirroring repro.yaml
+weight_decay: 0.0              # explicit, mirroring repro.yaml
+warmup_steps: 0
+workers: 8
+seed: 0
+
+# bookkeeping — 4k grid for the planning-eval curve, as in the reproduction
+eval_every: 4000
+eval_samples: 1200             # same balanced probe size as repro.yaml
+logging_steps: 50
+save_steps: 4000
+save_total_limit: 16           # keep every checkpoint for planning evals
+wandb_project: swm-repro

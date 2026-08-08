@@ -132,7 +132,11 @@ class SAQADataset(Dataset):
             self._files[fi] = h5py.File(self.index.files[fi], "r")
         return self._files[fi]
 
-    def __getitem__(self, i: int) -> dict:
+    def _draw(self, i: int):
+        """Deterministic draw i -> (traj group, horizon group, i0, i1, q_idx,
+        stratum). This IS the sampling rule; subclasses (e.g. the DinoWM
+        predictor dataset) must reuse it unchanged so every consumer trains on
+        the identical sample stream."""
         rng = np.random.default_rng((self.seed, i))
         stratum = STRATA[rng.integers(len(STRATA))]
         pool = self.index.rows[stratum]
@@ -143,11 +147,15 @@ class SAQADataset(Dataset):
         g = f[tname]
         d = g["horizon_start"][str(int(start))][f"horizon_len_{int(h)}"]
         i0, i1 = int(d["start_idx"][()]), int(d["end_idx"][()])
+        return g, d, i0, i1, int(qi), stratum
+
+    def __getitem__(self, i: int) -> dict:
+        g, d, i0, i1, qi, stratum = self._draw(i)
         return {
             "image": np.asarray(g["frames"][i0], dtype=np.uint8),
             "actions": torch.as_tensor(np.asarray(g["actions"][i0:i1]), dtype=torch.float32),
-            "question": _s(d["questions"][()][int(qi)]),
-            "answer": "yes" if bool(d["answers"][()][int(qi)]) else "no",
+            "question": _s(d["questions"][()][qi]),
+            "answer": "yes" if bool(d["answers"][()][qi]) else "no",
             "qtype": stratum[0],
         }
 
