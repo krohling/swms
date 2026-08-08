@@ -100,12 +100,13 @@ def evaluate(model: PredictorForSAQA, index: SAQAIndex, cfg: dict,
 
     model.eval()
     per = collections.defaultdict(lambda: [0, 0])
-    cos_sum = cos_id_sum = n_seen = 0.0
+    cos_sum = cos_id_sum = ce_sum = n_seen = 0.0
     for batch in loader:
         history = batch["history"].to(device)
         actions = batch["actions"].to(device)
         action_mask = batch["action_mask"].to(device)
         target = batch["target"].to(device)
+        label_yes = batch["label_yes"].to(device)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             out = model.wm(history, actions, action_mask, target)
             img_embeds = model.judge.merge(out["z_pred"])
@@ -114,8 +115,13 @@ def evaluate(model: PredictorForSAQA, index: SAQAIndex, cfg: dict,
                 idx_by_q[q].append(i)
             p_yes = torch.zeros(history.shape[0], device=device)
             for q, idxs in idx_by_q.items():
-                p_yes[idxs] = model.judge.p_yes(model.judge._prompt(q),
-                                                img_embeds[idxs]).float()
+                pi = model.judge._prompt(q)
+                p_yes[idxs] = model.judge.p_yes(pi, img_embeds[idxs]).float()
+                # Val CE loss (the training objective of the ce arm) on the
+                # same probe: accuracy alone can stay flat while CE rises,
+                # which is the overfitting signature we watch for.
+                ce_sum += float(model.judge.answer_ce(pi, img_embeds[idxs],
+                                                      label_yes[idxs]))
         pred_yes = (p_yes >= 0.5).cpu().numpy()
         for qt, ans, p in zip(batch["qtype"], batch["label_yes"].numpy(), pred_yes):
             per[qt][1] += 1
@@ -131,6 +137,8 @@ def evaluate(model: PredictorForSAQA, index: SAQAIndex, cfg: dict,
     metrics["eval/cos_sim"] = cos_sum / max(1, n_seen)
     metrics["eval/cos_sim_identity"] = cos_id_sum / max(1, n_seen)
     metrics["eval/cos_sim_gain"] = metrics["eval/cos_sim"] - metrics["eval/cos_sim_identity"]
+    metrics["eval/cos_loss"] = 1.0 - metrics["eval/cos_sim"]
+    metrics["eval/ce_loss"] = ce_sum / max(1, n_seen)
     return metrics
 
 
