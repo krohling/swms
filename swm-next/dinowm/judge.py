@@ -144,6 +144,80 @@ class StudentVQAHead:
             self.full_model.model.get_image_features = orig
         return logits
 
+    def _llm_answer_logits_multi(self, prompt_infos: list, img_embeds: torch.Tensor) -> torch.Tensor:
+        """One LLM forward for B samples with per-sample (possibly different)
+        prompts. Right-pads input_ids to the batch max length and reads the
+        answer logits at each sample's last REAL token. Numerically equivalent
+        to grouping by question and calling _llm_answer_logits per group, but
+        ~5x faster on batches of mostly-distinct questions (one big forward
+        instead of many size-1 forwards through the 8B judge).
+
+        Every prompt embeds the same number of image tokens (fixed grid), so
+        the patched get_image_features splices per-sample latents correctly."""
+        B = img_embeds.shape[0]
+        assert len(prompt_infos) == B
+        device = self.device
+        lens = [int(pi.input_ids.shape[0]) for pi in prompt_infos]
+        L = max(lens)
+        pad_id = self.tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = 0
+        input_ids = torch.full((B, L), pad_id, dtype=torch.long)
+        attn = torch.zeros((B, L), dtype=prompt_infos[0].attention_mask.dtype)
+        mm = None
+        if prompt_infos[0].mm_token_type_ids is not None:
+            mm = torch.zeros((B, L), dtype=prompt_infos[0].mm_token_type_ids.dtype)
+        for b, pi in enumerate(prompt_infos):
+            input_ids[b, : lens[b]] = pi.input_ids
+            attn[b, : lens[b]] = pi.attention_mask
+            if mm is not None:
+                mm[b, : lens[b]] = pi.mm_token_type_ids
+        input_ids = input_ids.to(device)
+        attn = attn.to(device)
+        per_image = [img_embeds[b] for b in range(B)]
+        ps = int(self.full_model.config.vision_config.patch_size)
+        grid = self.image_size // ps
+        image_grid_thw = torch.tensor([[1, grid, grid]], dtype=torch.long, device=device).expand(B, 3).contiguous()
+        dummy_pixels = torch.zeros(1, dtype=self.precision, device=device)
+        extra = {}
+        if mm is not None:
+            extra["mm_token_type_ids"] = mm.to(device)
+
+        def patched(*args, **kwargs):
+            if kwargs.get("return_dict", False):
+                import types
+                return types.SimpleNamespace(pooler_output=tuple(per_image), deepstack_features=None)
+            return tuple(per_image), None
+
+        orig = self.full_model.model.get_image_features
+        self.full_model.model.get_image_features = patched
+        try:
+            outputs = self.full_model.model(
+                input_ids=input_ids, attention_mask=attn,
+                pixel_values=dummy_pixels, image_grid_thw=image_grid_thw, **extra,
+            )
+            hidden = outputs.last_hidden_state
+            last = torch.tensor(lens, device=device) - 1
+            logits = self.full_model.lm_head(
+                hidden[torch.arange(B, device=device), last, :]).float()
+        finally:
+            self.full_model.model.get_image_features = orig
+        return logits
+
+    def answer_ce_multi(self, prompt_infos: list, img_embeds: torch.Tensor,
+                        label_yes: torch.Tensor) -> torch.Tensor:
+        """Batched multi-prompt version of answer_ce (sum-reduced, same math).
+        yes/no token ids are prompt-independent (same answer wording), taken
+        from the first prompt."""
+        B = img_embeds.shape[0]
+        logits = self._llm_answer_logits_multi(prompt_infos, img_embeds)
+        yes_id = prompt_infos[0].desired_token_ids[0]
+        no_id = prompt_infos[0].other_token_ids[0]
+        targets = torch.where(label_yes >= 0.5,
+                              torch.full((B,), yes_id, device=self.device),
+                              torch.full((B,), no_id, device=self.device))
+        return F.cross_entropy(logits, targets, reduction="sum")
+
     def p_yes(self, prompt_info: _PromptInfo, img_embeds: torch.Tensor) -> torch.Tensor:
         """(B,) P(yes) over the yes/no token variants."""
         logits = self._llm_answer_logits(prompt_info, img_embeds)

@@ -16,8 +16,6 @@ Objectives:
 """
 from __future__ import annotations
 
-from collections import defaultdict
-
 import torch
 import torch.nn as nn
 
@@ -53,17 +51,12 @@ class PredictorForSAQA(nn.Module):
             loss = out["loss"]
             ce_mean = torch.zeros((), device=loss.device)
         else:
-            # Group rows by question so each judge forward shares one prompt
-            # (same batching as the July judge-in-the-loop arm).
+            # One batched multi-prompt judge forward for the whole micro-batch
+            # (numerically equivalent to grouping by question; ~5x faster on
+            # mostly-distinct questions, which is what balanced SAQA draws give).
             img_embeds = self.judge.merge(out["z_pred"])
-            idx_by_q = defaultdict(list)
-            for i, q in enumerate(question):
-                idx_by_q[q].append(i)
-            ce_sum = torch.zeros((), device=img_embeds.device)
-            for q, idxs in idx_by_q.items():
-                pi = self.judge._prompt(q)
-                ce_sum = ce_sum + self.judge.answer_ce(
-                    pi, img_embeds[idxs], label_yes[idxs])
+            prompt_infos = [self.judge._prompt(q) for q in question]
+            ce_sum = self.judge.answer_ce_multi(prompt_infos, img_embeds, label_yes)
             ce_mean = ce_sum / max(1, len(question))
             loss = ce_mean + self.cos_weight * out["loss"]
 
