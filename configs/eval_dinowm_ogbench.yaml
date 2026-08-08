@@ -1,0 +1,59 @@
+# DinoWM predictor arms on OGBench — the reproduction's eval_gradient_full_ogbench
+# with ONLY the model substituted (model_type: dinowm + checkpoint paths).
+# Planner, tasks, seeds, and every hyperparameter mirror that config.
+
+name: "ogbench_dinowm"
+
+device: "cuda:0"
+deterministic: true
+
+model_type: "dinowm"
+
+paths:
+  root_save_path: "${hydra:runtime.cwd}/outputs_dinowm"
+  # Trainer checkpoint dir, e.g. .../runs/dinowm-cosine-64m-v1/checkpoint-4000
+  model_ckpt_path: ???
+  processor_path: ""            # unused for dinowm
+  # swm-next dir (for the dinowm package) and the arm's training config
+  swm_next_dir: "${hydra:runtime.cwd}/swm-next"
+  dinowm_config: "${hydra:runtime.cwd}/swm-next/configs/predictor_cosine.yaml"
+
+env_type: "ogbench"
+seed_start: 6000
+num_seeds: 25                    # curve protocol; headline runs override to 50
+
+goal_type: "stack_blocks"
+
+tasks:
+  - block_combo: ["blue_cube", "green_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt"
+  - block_combo: ["blue_cube", "yellow_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/blue_cube_yellow_cube.pt"
+  - block_combo: ["yellow_cube", "red_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/yellow_cube_red_cube.pt"
+
+planning:
+  planning_name: "gradient_full"
+
+  diffusion: true
+  mppi: false
+  gradient: true
+  expert_diffusion: false
+
+  num_steps: 50
+  num_actions_executed: 4
+  action_skip: 8
+  pred_horizon: 16
+  num_samples: 1
+  num_planning_iters: 20
+
+  gradient_lr: .2
+  gradient_clipping_value: 10.0
+
+  mppi_temperature: 1.0
+
+model_batch_size: 64
+action_dim: 5
+
+
+intermediate_hm: false

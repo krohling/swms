@@ -79,8 +79,18 @@ def run_evaluation(cfg: DictConfig):
     device = cfg.get("device", "cuda")
     model = None
     if not planning_cfg.expert_diffusion:
-        model = SWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path, processor_path=cfg.paths.processor_path, tokens=ANSWER_OPTIONS,
-                             precision=torch.bfloat16, device=device)
+        if cfg.get("model_type", "swm") == "dinowm":
+            # DinoWM predictor arms: same harness, model substituted.
+            import sys
+            sys.path.insert(0, cfg.paths.swm_next_dir)
+            from dinowm.grad_model import DinoWMGradModel
+            model = DinoWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path,
+                                    config_path=cfg.paths.dinowm_config,
+                                    tokens=ANSWER_OPTIONS,
+                                    precision=torch.bfloat16, device=device)
+        else:
+            model = SWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path, processor_path=cfg.paths.processor_path, tokens=ANSWER_OPTIONS,
+                                 precision=torch.bfloat16, device=device)
 
     for task_idx, task in enumerate(tasks):
         block_combo = task["block_combo"]
