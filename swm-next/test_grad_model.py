@@ -49,8 +49,10 @@ assert g0 is not None and torch.isfinite(g0).all() and float(g0.abs().sum()) > 0
 print(f"get_scores OK  p_yes={p_yes.detach().cpu().numpy().round(4)}  "
       f"|dL/da|={float(g0.abs().mean()):.2e}", flush=True)
 
-# --- get_probabilistic_rewards_wm: the harness reward loop end to end
-action_seq = torch.randn(2, 16, 5, device=device, requires_grad=True)
+# --- get_probabilistic_rewards_wm: the harness reward loop end to end.
+# The gradient planner optimizes a CPU leaf tensor (plan_model_gradient uses
+# .numpy() and CPU SGD), so the reward loop must receive CPU actions.
+action_seq = torch.randn(2, 16, 5, requires_grad=True)
 qs = [(questions[0], "yes", 1.0), (questions[1], "no", 1.0)]
 rewards, weighted, grad_sum = m.get_probabilistic_rewards_wm(
     action_seq=action_seq, image=img, pred_horizon=16, questions=qs,
