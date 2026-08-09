@@ -23,7 +23,10 @@ dropout: 0.1
 objective: cosine
 cos_weight: 0.0                # unused for the cosine objective
 
-# training — recipe protocol (A.1/A.2); only the LR is model-specific
+# training — recipe protocol (A.1/A.2); LR and precision are model-specific
+bf16: false                    # v1 diverged under bf16 autocast at step ~7k
+                               # (grad_norm ~1e10); fp32 is the DinoWM-lineage
+                               # numerics this arch+lr has always been stable in
 max_steps: 64000
 effective_batch: 96
 micro_batch: 96                # A100 probe: bs=96 fits, 39.1 samples/s

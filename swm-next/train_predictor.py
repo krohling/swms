@@ -203,7 +203,12 @@ def main() -> None:
         max_grad_norm=float(cfg.get("max_grad_norm", 1.0)),
         weight_decay=float(cfg.get("weight_decay", 0.0)),
         optim="adamw_torch",                         # A.2
-        bf16=True,
+        # Precision follows the ARCHITECTURE, not the VLM recipe: the cosine
+        # objective diverged under bf16 autocast at 5e-4 (grad_norm ~1e10 by
+        # step ~7k), while this predictor + lr has only ever been stable in
+        # fp32 (July arms, upstream DinoWM). The ce objective needs autocast
+        # for the judge path and trains stably under it.
+        bf16=bool(cfg.get("bf16", True)),
         gradient_checkpointing=False,                # judge checkpoints itself
         dataloader_num_workers=int(cfg["workers"]),
         logging_steps=int(cfg["logging_steps"]),
