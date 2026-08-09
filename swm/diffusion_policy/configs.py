@@ -49,8 +49,11 @@ class DatasetConfig:
 
 @dataclass
 class DiffusionModelRunConfig:
-    hydra: ExperimentHydraConfig = ExperimentHydraConfig()
-    dataset: DatasetConfig = DatasetConfig()
+    # default_factory: Python >= 3.11 rejects dataclass instances as mutable
+    # field defaults (the original ran on an older interpreter). No semantic
+    # change — each instance still gets a fresh default config.
+    hydra: ExperimentHydraConfig = field(default_factory=ExperimentHydraConfig)
+    dataset: DatasetConfig = field(default_factory=DatasetConfig)
     device: str = "cuda"
     checkpoint_path: str = "${hydra:runtime.cwd}/diffusion_checkpoint.pt"
 
