@@ -113,6 +113,13 @@ class DinoWMGradModel(SWMGradModel):
         B = len(images)
         device = self.device
 
+        # actions=None: current-state VQA (the goal generator probes e.g.
+        # "is the robot grasping X?" before planning). Map to h=0 — an empty
+        # action window with an all-False mask — the identity-prediction case
+        # the predictor trained on (target == current frame at horizon 0).
+        if actions is None:
+            actions = [torch.zeros(0, self.action_dim, device=device)] * B
+
         # The planner scores one current frame against many action candidates;
         # encode it once and expand. Fall back to per-image encoding if the
         # batch ever mixes frames.
