@@ -39,9 +39,13 @@ class QwenJudge:
     def __init__(self, model_id="Qwen/Qwen3-VL-8B-Instruct", device="cuda"):
         from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
         self.device = device
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
-            model_id, dtype=torch.bfloat16, low_cpu_mem_usage=True
-        ).to(device).eval()
+        try:
+            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model_id, dtype=torch.bfloat16, low_cpu_mem_usage=True)
+        except TypeError:  # transformers < 5 uses torch_dtype
+            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model_id, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
+        self.model = self.model.to(device).eval()
         for p in self.model.parameters():
             p.requires_grad = False
         self.processor = AutoProcessor.from_pretrained(model_id)
@@ -54,14 +58,9 @@ class QwenJudge:
         self.no_ids = singles([" No", " no", "No", "no"])
 
     @torch.no_grad()
-    def p_yes(self, images, questions):
+    def p_yes(self, images, questions) -> np.ndarray:
         """images: list of np uint8 HWC frames; questions: list[str] (same
-        length). One forward, batched. Returns (p_yes, mass), both (B,)
-        float32: p_yes is P(yes) RENORMALIZED over {yes, no} (the training
-        label); mass is the UNNORMALIZED P(yes)+P(no) — how much of the full
-        vocab distribution the two answer classes actually capture
-        (visibility only; ~1.0 means the prompt fully constrained the
-        model, low values flag answers leaking into other tokens)."""
+        length). One forward, batched; returns (B,) float32 P(yes)."""
         texts = []
         for q in questions:
             messages = [{"role": "user", "content": [
@@ -82,9 +81,7 @@ class QwenJudge:
         probs = torch.softmax(logits, dim=-1)
         yes = probs[:, self.yes_ids].sum(dim=-1)
         no = probs[:, self.no_ids].sum(dim=-1)
-        mass = yes + no
-        return ((yes / mass.clamp_min(1e-12)).cpu().numpy(),
-                mass.cpu().numpy())
+        return (yes / (yes + no).clamp_min(1e-12)).cpu().numpy()
 
 
 def main():
@@ -95,14 +92,12 @@ def main():
     ap.add_argument("--batch", type=int, default=96)
     ap.add_argument("--shard", default="0/1", help="i/n over sorted trajectories")
     ap.add_argument("--limit-trajs", type=int, default=0, help="smoke: stop after N trajs")
-    ap.add_argument("--device", default="cuda", help="cuda | mps | cpu (mps/cpu for local stepping)")
     args = ap.parse_args()
 
     si, sn = (int(x) for x in args.shard.split("/"))
-    judge = QwenJudge(model_id=args.model, device=args.device)
+    judge = QwenJudge(model_id=args.model)
 
     agree = defaultdict(lambda: [0, 0])   # qtype -> [agree, total]
-    mass_all: list[np.ndarray] = []       # unnormalized P(yes)+P(no) per question
     n_q = 0
     t0 = time.time()
 
@@ -135,7 +130,6 @@ def main():
                                      bool(ans[qi]), _s(typs[qi])))
             frame_cache: dict[int, np.ndarray] = {}
             preds = np.zeros(len(rows), dtype=np.float16)
-            masses = np.zeros(len(rows), dtype=np.float16)
             for b0 in range(0, len(rows), args.batch):
                 chunk = rows[b0 : b0 + args.batch]
                 imgs = []
@@ -143,32 +137,26 @@ def main():
                     if fi_ not in frame_cache:
                         frame_cache[fi_] = np.asarray(frames[fi_], dtype=np.uint8)
                     imgs.append(frame_cache[fi_])
-                p, m = judge.p_yes(imgs, [c[4] for c in chunk])
+                p = judge.p_yes(imgs, [c[4] for c in chunk])
                 preds[b0 : b0 + len(chunk)] = p.astype(np.float16)
-                masses[b0 : b0 + len(chunk)] = m.astype(np.float16)
                 for c, pv in zip(chunk, p):
                     agree[c[6]][1] += 1
                     agree[c[6]][0] += int((pv >= 0.5) == c[5])
                 n_q += len(chunk)
-                mass_all.append(m)
 
             # Atomic-ish per-traj write: fill all horizon groups, then mark complete.
             tgrp = out.require_group(tname)
             by_group = defaultdict(list)
             for r_i, (start, hname, qi, _, _, _, _) in enumerate(rows):
-                by_group[(start, hname)].append((qi, preds[r_i], masses[r_i]))
+                by_group[(start, hname)].append((qi, preds[r_i]))
             for (start, hname), vals in by_group.items():
-                n_vals = max(v[0] for v in vals) + 1
-                arr = np.zeros(n_vals, dtype=np.float16)
-                marr = np.zeros(n_vals, dtype=np.float16)
-                for qi, pv, mv in vals:
+                arr = np.zeros(max(v[0] for v in vals) + 1, dtype=np.float16)
+                for qi, pv in vals:
                     arr[qi] = pv
-                    marr[qi] = mv
                 dgrp = tgrp.require_group(f"horizon_start/{start}/{hname}")
-                for name, data in (("p_yes", arr), ("yn_mass", marr)):
-                    if name in dgrp:
-                        del dgrp[name]
-                    dgrp.create_dataset(name, data=data)
+                if "p_yes" in dgrp:
+                    del dgrp["p_yes"]
+                dgrp.create_dataset("p_yes", data=arr)
             tgrp.attrs["complete"] = True
             out.flush()
 
@@ -185,12 +173,6 @@ def main():
     tot_a = sum(v[0] for v in agree.values())
     tot_n = sum(v[1] for v in agree.values())
     print(f"  {'OVERALL':28s} {100*tot_a/max(1,tot_n):6.2f}%  (n={tot_n:,})")
-    if mass_all:
-        m = np.concatenate(mass_all)
-        print(f"=== G-T2: yes/no mass capture (unnormalized P(yes)+P(no)) ===")
-        print(f"  mean {m.mean():.4f}  q01/q10/q50 "
-              f"{np.quantile(m, .01):.4f}/{np.quantile(m, .10):.4f}/{np.quantile(m, .50):.4f}  "
-              f"min {m.min():.4f}  frac<0.9: {100*(m < 0.9).mean():.2f}%")
     print("LABELING_SHARD_DONE", flush=True)
 
 
