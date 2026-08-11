@@ -1,0 +1,45 @@
+# SWM teacher-label arm — repro.yaml with ONE substitution: training
+# labels come from the frozen Qwen3-VL judge (argmax) instead of the
+# simulator oracle. Model, schedule, sampler logic, eval: identical.
+run_name: swm-teacher-v1
+out_dir: /work/11599/krohling/vista/swm-repro/runs/teacher-v1
+
+# data
+noisy_hdf5: /work/11599/krohling/vista/swm-repro/data/noisy.hdf5
+play_hdf5:  /work/11599/krohling/vista/swm-repro/data/play.hdf5
+# Teacher sidecars (label_teacher.py). Presence of noisy_teacher switches the
+# TRAINING labels + strata to the Qwen judge's argmax; the val probe stays
+# oracle-scored. This is the ONLY delta from repro.yaml.
+noisy_teacher: /work/11599/krohling/vista/swm-repro/data/noisy.teacher.hdf5
+play_teacher:  /work/11599/krohling/vista/swm-repro/data/play.teacher.hdf5
+val_frac: 0.1                  # ours: held-out trajectories, paper is silent
+
+# model
+base_model: google/paligemma-3b-pt-224          # 3.2: PaliGemma 3B
+processor_path: /work/11599/krohling/vista/swm-followup/swms/ckpts/paligemma_wm_ogbench
+
+# training
+max_steps: 64000               # A.1: ~64,000 gradient steps for OGBench
+effective_batch: 96            # A.1: effective batch size 96
+micro_batch: 16                # ours: fits a GH200; accum = 96/16 = 6
+learning_rate: 1.0e-5          # A.1: linear decay starting at 1e-5
+
+# The paper specifies none of the following. These are transformers' Trainer
+# defaults, kept because the author's instruction was "use the HF Trainer" --
+# but stated explicitly so they are reviewable rather than inherited silently.
+# Asked Jacob to confirm (docs/Jacob.md Q3).
+max_grad_norm: 1.0             # Trainer default. ACTIVE: smoke grad norms were
+                               # 3.4-22.3, so nearly every step is clipped.
+weight_decay: 0.0              # Trainer default. Makes AdamW == Adam; A.2 says AdamW.
+warmup_steps: 0                # Trainer default. A.1 mentions only linear decay
+                               # from 1e-5 and is silent on warmup.
+workers: 8
+seed: 0
+
+# bookkeeping
+eval_every: 4000               # ours: 16 points across the run
+eval_samples: 1200             # ours: balanced over the 12 strata
+logging_steps: 50
+save_steps: 4000
+save_total_limit: 16          # ours: keep every checkpoint for planning evals
+wandb_project: swm-repro

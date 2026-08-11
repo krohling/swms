@@ -112,7 +112,13 @@ def main() -> None:
         os.environ.setdefault("WANDB_PROJECT", cfg["wandb_project"])
 
     files = [cfg["noisy_hdf5"], cfg["play_hdf5"]]
-    train_idx = SAQAIndex.build(files, split="train", val_frac=cfg["val_frac"])
+    # Teacher mode (label_teacher.py sidecars): training strata and answers
+    # come from the teacher's argmax; the val index/probe stays ORACLE-scored
+    # so eval/balanced_acc measures truth and stays comparable to the repro.
+    teacher = ([cfg["noisy_teacher"], cfg["play_teacher"]]
+               if cfg.get("noisy_teacher") else None)
+    train_idx = SAQAIndex.build(files, split="train", val_frac=cfg["val_frac"],
+                                teacher_files=teacher)
     val_idx = SAQAIndex.build(files, split="val", val_frac=cfg["val_frac"])
 
     steps = int(cfg["max_steps"])
@@ -136,7 +142,8 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"trainable parameters: {n_params:,} (full fine-tune)", flush=True)
 
-    train_ds = SAQADataset(train_idx, length=steps * eff_batch, seed=cfg["seed"])
+    train_ds = SAQADataset(train_idx, length=steps * eff_batch, seed=cfg["seed"],
+                           teacher_files=teacher)
 
     class EvalCallback(TrainerCallback):
         def on_step_end(self, args, state, control, **kw):

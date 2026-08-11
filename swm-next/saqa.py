@@ -44,16 +44,22 @@ class SAQAIndex:
     trajs: list[list[str]]
 
     @staticmethod
-    def _cache_path(files: list[str], split: str) -> str:
+    def _cache_path(files: list[str], split: str, teacher: bool = False) -> str:
         stem = "_".join(os.path.basename(f).split(".")[0] for f in files)
-        return os.path.join(os.path.dirname(files[0]), f".saqa_index_{stem}_{split}.npz")
+        tag = "_teacher" if teacher else ""
+        return os.path.join(os.path.dirname(files[0]), f".saqa_index_{stem}{tag}_{split}.npz")
 
     @classmethod
     def build(cls, files: list[str], split: str, val_frac: float = 0.1,
-              cache: bool = True) -> "SAQAIndex":
+              cache: bool = True, teacher_files: list[str] | None = None) -> "SAQAIndex":
+        """teacher_files: optional sidecar HDF5s (from label_teacher.py), one
+        per input file. When given, STRATA MEMBERSHIP uses the teacher's
+        argmax answer (p_yes >= 0.5) instead of the oracle answer, so the
+        balanced sampler balances what the model will actually be trained on.
+        Rows keep the same (file, traj, start, horizon, q_idx) shape."""
         import h5py
 
-        path = cls._cache_path(files, split)
+        path = cls._cache_path(files, split, teacher=teacher_files is not None)
         if cache and os.path.exists(path):
             z = np.load(path, allow_pickle=True)
             rows = {STRATA[i]: z[f"s{i}"] for i in range(len(STRATA))}
@@ -62,6 +68,7 @@ class SAQAIndex:
         acc: dict[tuple[str, bool], list] = {s: [] for s in STRATA}
         kept_trajs: list[list[str]] = []
         for fi, fpath in enumerate(files):
+            tf = h5py.File(teacher_files[fi], "r") if teacher_files else None
             with h5py.File(fpath, "r") as f:
                 names = sorted(f.keys(), key=lambda n: int(n.split("_")[-1]))
                 cut = int(round(len(names) * (1 - val_frac)))
@@ -76,9 +83,14 @@ class SAQAIndex:
                             d = sg[hname]
                             types = d["types"][()]
                             answers = d["answers"][()]
+                            if tf is not None:
+                                p = tf[tname]["horizon_start"][start][hname]["p_yes"][()]
+                                answers = p >= 0.5
                             for qi, (t, a) in enumerate(zip(types, answers)):
                                 acc[(_s(t), bool(a))].append(
                                     (fi, ti, int(start), h, qi))
+            if tf is not None:
+                tf.close()
 
         rows = {k: np.asarray(v, dtype=np.int32).reshape(-1, 5) for k, v in acc.items()}
         idx = cls(rows, files, kept_trajs)
@@ -117,11 +129,18 @@ class SAQADataset(Dataset):
     the same stream.
     """
 
-    def __init__(self, index: SAQAIndex, length: int, seed: int = 0):
+    def __init__(self, index: SAQAIndex, length: int, seed: int = 0,
+                 teacher_files: list[str] | None = None):
+        """teacher_files: optional label_teacher.py sidecars (one per index
+        file). When given, `answer` comes from the teacher's argmax
+        (p_yes >= 0.5) instead of the oracle — the ONLY behavioral change;
+        draws, images and actions are identical to oracle mode."""
         self.index = index
         self.length = int(length)
         self.seed = seed
+        self.teacher_files = teacher_files
         self._files: dict[int, object] = {}      # opened lazily, per worker
+        self._tfiles: dict[int, object] = {}
 
     def __len__(self) -> int:
         return self.length
@@ -131,6 +150,12 @@ class SAQADataset(Dataset):
         if fi not in self._files:
             self._files[fi] = h5py.File(self.index.files[fi], "r")
         return self._files[fi]
+
+    def _t5(self, fi: int):
+        import h5py
+        if fi not in self._tfiles:
+            self._tfiles[fi] = h5py.File(self.teacher_files[fi], "r")
+        return self._tfiles[fi]
 
     def __getitem__(self, i: int) -> dict:
         rng = np.random.default_rng((self.seed, i))
@@ -143,11 +168,17 @@ class SAQADataset(Dataset):
         g = f[tname]
         d = g["horizon_start"][str(int(start))][f"horizon_len_{int(h)}"]
         i0, i1 = int(d["start_idx"][()]), int(d["end_idx"][()])
+        if self.teacher_files is not None:
+            p = self._t5(int(fi))[tname]["horizon_start"][str(int(start))][
+                f"horizon_len_{int(h)}"]["p_yes"][int(qi)]
+            answer_yes = bool(p >= 0.5)
+        else:
+            answer_yes = bool(d["answers"][()][int(qi)])
         return {
             "image": np.asarray(g["frames"][i0], dtype=np.uint8),
             "actions": torch.as_tensor(np.asarray(g["actions"][i0:i1]), dtype=torch.float32),
             "question": _s(d["questions"][()][int(qi)]),
-            "answer": "yes" if bool(d["answers"][()][int(qi)]) else "no",
+            "answer": "yes" if answer_yes else "no",
             "qtype": stratum[0],
         }
 
