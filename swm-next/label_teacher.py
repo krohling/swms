@@ -59,22 +59,40 @@ class QwenJudge:
 
     @torch.no_grad()
     def p_yes(self, images, questions):
-        """images: list of np uint8 HWC frames; questions: list[str] (same
-        length). One forward, batched. Returns (p_yes, mass), both (B,)
+        """images: list where each element is EITHER one np uint8 HWC frame
+        (state question: the future frame) OR a (start_frame, future_frame)
+        pair (temporal 'closer' question — those labels compare the two
+        timesteps, which no single frame can answer). questions: list[str],
+        same length. One forward, batched. Returns (p_yes, mass), both (B,)
         float32: p_yes is P(yes) RENORMALIZED over {yes, no} (the training
         label); mass is the UNNORMALIZED P(yes)+P(no) — how much of the full
         vocab distribution the two answer classes actually capture
         (visibility only; ~1.0 means the prompt fully constrained the
         model, low values flag answers leaking into other tokens)."""
         texts = []
-        for q in questions:
-            messages = [{"role": "user", "content": [
-                {"type": "image"},
-                {"type": "text", "text": f"{q} Answer with one word: yes or no."},
-            ]}]
+        image_lists = []
+        for q, im in zip(questions, images):
+            pair = isinstance(im, (tuple, list))
+            if pair:
+                content = [
+                    {"type": "image"},
+                    {"type": "image"},
+                    {"type": "text", "text":
+                        "The first image shows the scene at an earlier time; "
+                        "the second image shows the scene now. Compared to the "
+                        f"earlier time: {q} Answer with one word: yes or no."},
+                ]
+                image_lists.append(list(im))
+            else:
+                content = [
+                    {"type": "image"},
+                    {"type": "text", "text": f"{q} Answer with one word: yes or no."},
+                ]
+                image_lists.append([im])
+            messages = [{"role": "user", "content": content}]
             texts.append(self.processor.apply_chat_template(
                 messages, add_generation_prompt=True, tokenize=False))
-        inputs = self.processor(text=texts, images=list(images),
+        inputs = self.processor(text=texts, images=image_lists,
                                 return_tensors="pt", padding=True).to(self.device)
         out = self.model(**inputs)
         # Answer position = each sequence's last real token (left/right padding
@@ -124,42 +142,52 @@ def main():
             # horizon groups but reusing each future frame for all its
             # questions (the processor re-encodes per row; frame reuse still
             # saves HDF5 reads).
-            rows = []      # (start, hname, qi, frame_idx, question, oracle, qtype)
+            rows = []      # (start, hname, qi, i0, i1, question, oracle, qtype)
             hs = g["horizon_start"]
             for start in hs:
                 sg = hs[start]
                 for hname in sg:
                     d = sg[hname]
+                    i0 = int(d["start_idx"][()])
                     i1 = int(d["end_idx"][()])
                     qs = d["questions"][()]
                     ans = d["answers"][()]
                     typs = d["types"][()]
                     for qi in range(len(qs)):
-                        rows.append((start, hname, qi, i1, _s(qs[qi]),
+                        rows.append((start, hname, qi, i0, i1, _s(qs[qi]),
                                      bool(ans[qi]), _s(typs[qi])))
             frame_cache: dict[int, np.ndarray] = {}
             preds = np.zeros(len(rows), dtype=np.float16)
             masses = np.zeros(len(rows), dtype=np.float16)
+
+            def frame(k):
+                if k not in frame_cache:
+                    frame_cache[k] = np.asarray(frames[k], dtype=np.uint8)
+                return frame_cache[k]
+
             for b0 in range(0, len(rows), args.batch):
                 chunk = rows[b0 : b0 + args.batch]
                 imgs = []
-                for _, _, _, fi_, _, _, _ in chunk:
-                    if fi_ not in frame_cache:
-                        frame_cache[fi_] = np.asarray(frames[fi_], dtype=np.uint8)
-                    imgs.append(frame_cache[fi_])
-                p, m = judge.p_yes(imgs, [c[4] for c in chunk])
+                for _, _, _, i0_, i1_, _, _, qt_ in chunk:
+                    # Temporal 'closer' labels compare start vs future poses;
+                    # the judge needs both frames to answer them.
+                    if qt_ in ("block_block_closer", "gripper_block_closer"):
+                        imgs.append((frame(i0_), frame(i1_)))
+                    else:
+                        imgs.append(frame(i1_))
+                p, m = judge.p_yes(imgs, [c[5] for c in chunk])
                 preds[b0 : b0 + len(chunk)] = p.astype(np.float16)
                 masses[b0 : b0 + len(chunk)] = m.astype(np.float16)
                 for c, pv in zip(chunk, p):
-                    agree[c[6]][1] += 1
-                    agree[c[6]][0] += int((pv >= 0.5) == c[5])
+                    agree[c[7]][1] += 1
+                    agree[c[7]][0] += int((pv >= 0.5) == c[6])
                 n_q += len(chunk)
                 mass_all.append(m)
 
             # Atomic-ish per-traj write: fill all horizon groups, then mark complete.
             tgrp = out.require_group(tname)
             by_group = defaultdict(list)
-            for r_i, (start, hname, qi, _, _, _, _) in enumerate(rows):
+            for r_i, (start, hname, qi, _, _, _, _, _) in enumerate(rows):
                 by_group[(start, hname)].append((qi, preds[r_i], masses[r_i]))
             for (start, hname), vals in by_group.items():
                 n_vals = max(v[0] for v in vals) + 1
