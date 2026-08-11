@@ -88,10 +88,11 @@ def main():
     ap.add_argument("--batch", type=int, default=96)
     ap.add_argument("--shard", default="0/1", help="i/n over sorted trajectories")
     ap.add_argument("--limit-trajs", type=int, default=0, help="smoke: stop after N trajs")
+    ap.add_argument("--device", default="cuda", help="cuda | mps | cpu (mps/cpu for local stepping)")
     args = ap.parse_args()
 
     si, sn = (int(x) for x in args.shard.split("/"))
-    judge = QwenJudge(model_id=args.model)
+    judge = QwenJudge(model_id=args.model, device=args.device)
 
     agree = defaultdict(lambda: [0, 0])   # qtype -> [agree, total]
     n_q = 0
