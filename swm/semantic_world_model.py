@@ -31,8 +31,14 @@ class SWMModel(ABC):
 
 
 class SWMGradModel(SWMModel):
+    # Same action ranking; sigmoid gradients vanish in saturated states, logit_margin's don't.
+    OBJECTIVES = ("sigmoid", "logit_margin")
+
     def __init__(self, checkpoint_path, processor_path, tokens=ANSWER_OPTIONS,
-                 precision=torch.float16, device="cuda"):
+                 precision=torch.float16, device="cuda", objective="sigmoid"):
+        if objective not in self.OBJECTIVES:
+            raise ValueError(f"objective must be one of {self.OBJECTIVES}, got {objective!r}")
+        self.objective = objective
         self.processor = PaliGemmaWMProcessor.from_pretrained(processor_path)
         self.tokens = tokens
         self.token_to_id = {token: self.processor.tokenizer.encode(token) for token in tokens}
@@ -47,7 +53,7 @@ class SWMGradModel(SWMModel):
 
         self.device = device
 
-    def get_scores(self, images, actions, questions):
+    def get_scores(self, images, actions, questions, return_logits=False):
         if isinstance(questions, str):
             questions = [questions] * len(images)
 
@@ -58,6 +64,9 @@ class SWMGradModel(SWMModel):
         logits = outputs.logits[:, -1, :].to(torch.float32)  # Get logits for the last token
         probs = torch.softmax(logits, dim=1)
         results = tuple(probs[:, self.token_to_id[token]].squeeze(1) for token in self.tokens)
+        if return_logits:
+            token_logits = tuple(logits[:, self.token_to_id[token]].squeeze(1) for token in self.tokens)
+            return results, token_logits
         return results
 
     def get_probabilistic_rewards_wm(self, action_seq, image, pred_horizon, questions, batch_size=64, action_skip=1,
@@ -81,8 +90,9 @@ class SWMGradModel(SWMModel):
                 batch_images = batch.pop('images')
                 batch_actions = batch.pop('actions')
                 batch_questions = batch.pop('questions')
-                probs_tuple = self.get_scores(batch_images, batch_actions, batch_questions)
-                
+                probs_tuple, logits_tuple = self.get_scores(batch_images, batch_actions, batch_questions,
+                                                            return_logits=True)
+
 
                 q_indices = batch['q_indices']
                 a_indices = batch['a_indices']
@@ -97,13 +107,17 @@ class SWMGradModel(SWMModel):
                     # Select correct probability based on desired token
                     if desired_token == self.tokens[0]:
                         prob = probs_tuple[0][idx]
+                        margin = logits_tuple[0][idx] - logits_tuple[1][idx]
                     elif desired_token == self.tokens[1]:
                         prob = probs_tuple[1][idx]
+                        margin = logits_tuple[1][idx] - logits_tuple[0][idx]
                     else:
                         raise ValueError(f"Invalid desired token: {desired_token}")
                     d_reward = prob.detach() if gradient else prob
+                    # Reported rewards stay probabilities; objective only changes the differentiated term.
                     rewards[q_idx, a_idx, h_step - action_skip: h_step] = d_reward.cpu().numpy()
-                    rewards_with_grad_sum += prob  * weights[q_idx] 
+                    opt_term = prob if self.objective == "sigmoid" else margin
+                    rewards_with_grad_sum += opt_term * weights[q_idx]
             # Apply weights to rewards
             weighted_rewards = rewards.copy()
             for i in range(len(weights)):
