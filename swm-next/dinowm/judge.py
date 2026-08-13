@@ -218,6 +218,19 @@ class StudentVQAHead:
                               torch.full((B,), no_id, device=self.device))
         return F.cross_entropy(logits, targets, reduction="sum")
 
+    def answer_bce_multi(self, prompt_infos: list, img_embeds: torch.Tensor,
+                         label_yes: torch.Tensor) -> torch.Tensor:
+        """Batched multi-prompt BCE on the renormalized pair probability
+        (sum-reduced, mirroring answer_ce_multi). The logit is
+        logsumexp(yes variants) - logsumexp(no variants), so sigmoid(logit)
+        equals p_yes() exactly; unlike full-vocab CE, no gradient reaches the
+        other vocab entries."""
+        logits = self._llm_answer_logits_multi(prompt_infos, img_embeds)
+        yes = torch.logsumexp(logits[:, prompt_infos[0].desired_token_ids], dim=-1)
+        no = torch.logsumexp(logits[:, prompt_infos[0].other_token_ids], dim=-1)
+        return F.binary_cross_entropy_with_logits(
+            yes - no, (label_yes >= 0.5).float(), reduction="sum")
+
     def p_yes(self, prompt_info: _PromptInfo, img_embeds: torch.Tensor) -> torch.Tensor:
         """(B,) P(yes) over the yes/no token variants."""
         logits = self._llm_answer_logits(prompt_info, img_embeds)

@@ -27,9 +27,9 @@ class PredictorForSAQA(nn.Module):
     def __init__(self, wm: OneShotWorldModel, judge: StudentVQAHead | None,
                  objective: str = "cosine", cos_weight: float = 0.0):
         super().__init__()
-        assert objective in ("cosine", "ce"), objective
-        if objective == "ce":
-            assert judge is not None, "ce objective requires the judge"
+        assert objective in ("cosine", "ce", "bce"), objective
+        if objective in ("ce", "bce"):
+            assert judge is not None, f"{objective} objective requires the judge"
         self.predictor = wm.predictor          # the ONLY registered submodule
         self._frozen = (wm, judge)             # tuple: hidden from state_dict/.to()
         self.objective = objective
@@ -56,8 +56,13 @@ class PredictorForSAQA(nn.Module):
             # mostly-distinct questions, which is what balanced SAQA draws give).
             img_embeds = self.judge.merge(out["z_pred"])
             prompt_infos = [self.judge._prompt(q) for q in question]
-            ce_sum = self.judge.answer_ce_multi(prompt_infos, img_embeds, label_yes)
-            ce_mean = ce_sum / max(1, len(question))
+            if self.objective == "bce":
+                # BCE on the renormalized yes/no pair probability: same
+                # decision quantity as p_yes(), no gradient on other vocab.
+                ans_sum = self.judge.answer_bce_multi(prompt_infos, img_embeds, label_yes)
+            else:
+                ans_sum = self.judge.answer_ce_multi(prompt_infos, img_embeds, label_yes)
+            ce_mean = ans_sum / max(1, len(question))
             loss = ce_mean + self.cos_weight * out["loss"]
 
         # Scalars for the trainer's logging callback (Trainer only logs
@@ -65,7 +70,7 @@ class PredictorForSAQA(nn.Module):
         self._last_metrics = {
             "train/cos_sim": float(out["cos_sim"]),
             "train/cos_sim_identity": float(out["cos_sim_identity"]),
-            "train/ce_loss": float(ce_mean),
+            ("train/bce_loss" if self.objective == "bce" else "train/ce_loss"): float(ce_mean),
             "train/cos_loss": float(out["loss"]),
         }
         return {
