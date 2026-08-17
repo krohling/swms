@@ -77,10 +77,12 @@ def run_evaluation(cfg: DictConfig):
     overall_total = 0
     overall_time = 0.0
     device = cfg.get("device", "cuda")
+    objective = cfg.get("objective", "sigmoid")
+    print(f"Planner objective: {objective}")
     model = None
     if not planning_cfg.expert_diffusion:
         model = SWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path, processor_path=cfg.paths.processor_path, tokens=ANSWER_OPTIONS,
-                             precision=torch.bfloat16, device=device)
+                             precision=torch.bfloat16, device=device, objective=objective)
 
     for task_idx, task in enumerate(tasks):
         block_combo = task["block_combo"]

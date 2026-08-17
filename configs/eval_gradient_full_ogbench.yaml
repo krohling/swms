@@ -25,6 +25,9 @@ num_seeds: 50
 
 goal_type: "stack_blocks"
 
+# Planner objective: "sigmoid" (default) or "logit_margin" (unsquashed gradients).
+objective: "sigmoid"
+
 # One entry per (block_combo, diffusion_path) pairing. The eval script iterates
 # over this list, running `num_seeds` evaluations per task.
 tasks:
