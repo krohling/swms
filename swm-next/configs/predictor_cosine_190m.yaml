@@ -1,0 +1,46 @@
+# DinoWM predictor, cosine arm — SWM repro recipe with the model substituted.
+# Data, sampling, schedule, optimizer bounds and evaluation match
+# configs/repro.yaml; only the model block and learning_rate differ.
+run_name: dinowm-cosine-190m-v1
+out_dir: /scratch/cluster/krohling/swm-next/runs/dinowm-cosine-190m-v1
+
+# data — sign-fix dataset (gripper_block_closer label inversion corrected)
+noisy_hdf5: /scratch/cluster/krohling/swm-next/data/noisy-fixed.hdf5
+play_hdf5:  /scratch/cluster/krohling/swm-next/data/play-fixed.hdf5
+val_frac: 0.1                  # same held-out trajectories as repro.yaml
+
+# model — the substitution: frozen Qwen3-VL ViT + 64M OneShotPredictor
+model_id: Qwen/Qwen3-VL-8B-Instruct
+output_stage: pre_merger
+image_size: 224                # recipe resolution (PaliGemma is 224)
+action_dim: 5                  # A.3.1
+max_horizon: 20                # A.3.2: horizons sampled 0-20 (h=0 included)
+obs_horizon: 2                 # DinoWM architecture: two-frame history
+depth: 12                      # 190M predictor (July XL dims: 12/16/4608)
+heads: 16
+mlp_dim: 4608
+dropout: 0.1
+objective: cosine
+cos_weight: 0.0                # unused for the cosine objective
+
+# training — recipe protocol (A.1/A.2); LR and precision are model-specific
+bf16: false                    # v1 diverged under bf16 autocast at step ~7k
+                               # (grad_norm ~1e10); fp32 is the DinoWM-lineage
+                               # numerics this arch+lr has always been stable in
+max_steps: 64000
+effective_batch: 96
+micro_batch: 48                # halved from 64M cosine (96); 190M smoke must validate
+learning_rate: 5.0e-4          # upstream DinoWM predictor_lr (not the VLM 1e-5)
+max_grad_norm: 1.0             # explicit, mirroring repro.yaml
+weight_decay: 0.0              # explicit, mirroring repro.yaml
+warmup_steps: 0
+workers: 8
+seed: 0
+
+# bookkeeping — 4k grid for the planning-eval curve, as in the reproduction
+eval_every: 4000
+eval_samples: 1200             # same balanced probe size as repro.yaml
+logging_steps: 50
+save_steps: 8000
+save_total_limit: 8           # keep every checkpoint for planning evals
+wandb_project: swm-repro
