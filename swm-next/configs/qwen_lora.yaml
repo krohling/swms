@@ -1,0 +1,41 @@
+# Qwen3-VL + LoRA — a VARIANT, not a reproduction of the paper.
+# Data, sampler, objective (cross-entropy on the answer) and evaluation are
+# identical to configs/repro.yaml; only the architecture and tuning differ.
+run_name: swm-qwen-lora-v2
+out_dir: /work/11599/krohling/vista/swm-repro/runs/qwen-lora-v2
+
+# data — identical to the reproduction
+noisy_hdf5: /work/11599/krohling/vista/swm-repro/data/noisy.hdf5
+play_hdf5:  /work/11599/krohling/vista/swm-repro/data/play.hdf5
+val_frac: 0.1                  # same held-out trajectories as repro.yaml
+
+# model
+base_model: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5                  # A.3.1
+max_horizon: 20                # A.3.2: horizons are sampled from 0-20
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+
+# training — same objective, batch and schedule shape as the reproduction.
+# max_steps is a PLACEHOLDER: size it from the measured smoke throughput
+# (the old 16k figure came from an unmeasured estimate at 448px).
+max_steps: 16000
+effective_batch: 96            # matches repro.yaml
+micro_batch: 8                 # 8B is heavier than 3B; accum = 96/8 = 12
+learning_rate: 1.0e-5          # DECISION PENDING: matches repro.yaml so the
+                               # only changed variable is architecture; LoRA
+                               # convention would be 1e-4. Flip deliberately.
+max_grad_norm: 1.0             # explicit, mirroring repro.yaml
+weight_decay: 0.0              # explicit, mirroring repro.yaml
+warmup_steps: 0
+workers: 8
+seed: 0
+
+# bookkeeping
+eval_every: 1000
+eval_samples: 1200             # same balanced probe as repro.yaml
+logging_steps: 50
+save_steps: 1000
+save_total_limit: 16           # keep every checkpoint for planning evals
+wandb_project: swm-repro

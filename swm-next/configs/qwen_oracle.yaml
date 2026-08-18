@@ -22,7 +22,7 @@ lora_dropout: 0.05
 # training — recipe budget (64k steps x eff. batch 96 = 6.14M samples).
 max_steps: 64000
 effective_batch: 96            # matches repro.yaml
-micro_batch: 8                 # PLACEHOLDER: validate + tune in the smoke
+micro_batch: 48                # smoke 920184: peak 43.5/95 GB, 43.3 samples/s
 learning_rate: 1.0e-4          # LoRA convention (web anchors for Qwen3-VL-8B),
                                # NOT the recipe's full-FT 1e-5 — a deliberate,
                                # flagged substitution (Kevin 2026-08-18)
