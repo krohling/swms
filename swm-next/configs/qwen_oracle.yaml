@@ -1,0 +1,41 @@
+# Qwen3-VL-8B + LoRA SWM, ORACLE labels (Kevin, 2026-08-18).
+# A VARIANT of the recipe, not a reproduction: data, sampler, objective
+# (cross-entropy on the answer token) and probe match repro.yaml; the
+# architecture (Qwen3-VL-8B, LoRA decoder-only, action projection) and the
+# LoRA learning rate differ.
+run_name: swm-qwen-oracle-v1
+out_dir: /work/11599/krohling/vista/swm-repro/runs/qwen-oracle-v1
+
+# data — sign-fix dataset, ground-truth labels
+noisy_hdf5: /work/11599/krohling/vista/swm-repro/data/noisy-fixed.hdf5
+play_hdf5:  /work/11599/krohling/vista/swm-repro/data/play-fixed.hdf5
+val_frac: 0.1                  # same held-out trajectories as repro.yaml
+
+# model
+base_model: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5                  # A.3.1
+max_horizon: 20                # A.3.2: horizons are sampled from 0-20
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+
+# training — recipe budget (64k steps x eff. batch 96 = 6.14M samples).
+max_steps: 64000
+effective_batch: 96            # matches repro.yaml
+micro_batch: 8                 # PLACEHOLDER: validate + tune in the smoke
+learning_rate: 1.0e-4          # LoRA convention (web anchors for Qwen3-VL-8B),
+                               # NOT the recipe's full-FT 1e-5 — a deliberate,
+                               # flagged substitution (Kevin 2026-08-18)
+max_grad_norm: 1.0             # explicit, mirroring repro.yaml
+weight_decay: 0.0              # explicit, mirroring repro.yaml
+warmup_steps: 0
+workers: 8
+seed: 0
+
+# bookkeeping — campaign conventions (4k probe grid, 8k checkpoint grid)
+eval_every: 4000
+eval_samples: 1200             # same balanced probe as repro.yaml
+logging_steps: 50
+save_steps: 8000
+save_total_limit: 8            # keep every checkpoint for planning evals
+wandb_project: swm-repro

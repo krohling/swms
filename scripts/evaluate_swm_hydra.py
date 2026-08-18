@@ -81,8 +81,16 @@ def run_evaluation(cfg: DictConfig):
     print(f"Planner objective: {objective}")
     model = None
     if not planning_cfg.expert_diffusion:
-        model = SWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path, processor_path=cfg.paths.processor_path, tokens=ANSWER_OPTIONS,
-                             precision=torch.bfloat16, device=device, objective=objective)
+        model_type = cfg.get("model_type", "paligemma")
+        if model_type == "qwen":
+            from swm.qwen_wm import QwenSWMGradModel
+            model = QwenSWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path,
+                                     qwen_config=cfg.paths.qwen_config,
+                                     tokens=ANSWER_OPTIONS,
+                                     precision=torch.bfloat16, device=device, objective=objective)
+        else:
+            model = SWMGradModel(checkpoint_path=cfg.paths.model_ckpt_path, processor_path=cfg.paths.processor_path, tokens=ANSWER_OPTIONS,
+                                 precision=torch.bfloat16, device=device, objective=objective)
 
     for task_idx, task in enumerate(tasks):
         block_combo = task["block_combo"]
