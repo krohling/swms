@@ -69,6 +69,10 @@ class QwenSWMGradModel(SWMGradModel):
     def get_scores(self, images, actions, questions, return_logits=False):
         if isinstance(questions, str):
             questions = [questions] * len(images)
+        if actions is None:
+            # Action-free scoring (goal-generator questions): the h=0 case
+            # from training -- zero placeholder tokens, zero action rows.
+            actions = [torch.zeros(0, self.action_dim)] * len(images)
         batch = [{"question": q, "actions": a, "image": im}
                  for q, a, im in zip(questions, actions, images)]
         inputs = encode(self.processor, self.placeholder, self.action_dim,
