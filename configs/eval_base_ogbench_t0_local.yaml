@@ -1,0 +1,49 @@
+# LOCAL SANITY variant: task-0 only, n=25, mps. Derived from eval_base_ogbench.yaml.
+# OGBench in-distribution BASE policy (expert diffusion). Same hyperparameters as
+# eval_gradient_full_ogbench.yaml's commented base_diffusion block — only the
+# planning mode differs (expert_diffusion instead of gradient).
+
+name: "ogbench"
+
+device: "mps"
+deterministic: true
+
+paths:
+  root_save_path: "${hydra:runtime.cwd}/outputs"
+  model_ckpt_path: "${hydra:runtime.cwd}/ckpts/paligemma_wm_ogbench"
+  processor_path: "${paths.model_ckpt_path}"
+
+env_type: "ogbench"
+seed_start: 6000
+num_seeds: 25
+
+goal_type: "stack_blocks"
+
+tasks:
+  - block_combo: ["blue_cube", "green_cube"]
+    diffusion_path: "${hydra:runtime.cwd}/ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt"
+
+planning:
+  planning_name: "base_diffusion"
+
+  diffusion: true
+  mppi: false
+  gradient: false
+  expert_diffusion: true
+
+  num_steps: 50
+  num_actions_executed: 4
+  action_skip: 8
+  pred_horizon: 16
+  num_samples: 1
+  num_planning_iters: 20
+
+  gradient_lr: .2
+  gradient_clipping_value: 10.0
+
+  mppi_temperature: 1.0
+
+model_batch_size: 64
+action_dim: 5
+
+intermediate_hm: false

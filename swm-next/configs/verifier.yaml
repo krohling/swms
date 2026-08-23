@@ -1,0 +1,18 @@
+# Verifier-planning experiment (Kevin, 2026-08-23): can zero-shot Qwen select
+# successful base-policy rollouts? Local run (macOS/MPS); harness validated by
+# base-policy sanity eval reproducing the cluster's 52% exactly.
+out_dir: outputs_verifier
+device: mps
+
+# rollouts (Stage A)
+seed_start: 6000
+num_seeds: 25
+k_rollouts: 8
+block_combo: [blue_cube, green_cube]
+diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+max_cycles: 50                 # matches eval protocol num_steps
+actions_per_cycle: 4           # matches eval protocol num_actions_executed
+
+# verification (Stage B)
+model_id: Qwen/Qwen3-VL-8B-Instruct
+batch: 8

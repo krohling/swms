@@ -1,9 +1,5 @@
 from typing import Any, Tuple
 import numpy as np
-from language_table.environments.blocks import LanguageTableBlockVariants
-from language_table.environments.lang_table_data_generation import LanguageTableDataGeneration
-from language_table.environments.rewards.noop import NoOpReward
-from tf_agents.environments import gym_wrapper
 from PIL import Image
 from swm.utils.base_classes import BaseEnv
 import gymnasium
@@ -39,6 +35,12 @@ class LangTableEnv(BaseEnv):
 
 
 def get_lang_table_env(kwargs, seed=54):
+    # Language-table deps are heavy (TF) and only needed for LT runs; import lazily
+    # so ogbench-only environments (e.g. local macOS) don't require them.
+    from language_table.environments.blocks import LanguageTableBlockVariants
+    from language_table.environments.lang_table_data_generation import LanguageTableDataGeneration
+    from language_table.environments.rewards.noop import NoOpReward
+    from tf_agents.environments import gym_wrapper
     import tensorflow as tf
     # fix for gpu error in language table
     tf.config.experimental.set_visible_devices([], "GPU")
