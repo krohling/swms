@@ -134,7 +134,10 @@ def verify_stage(cfg):
                 start=np.asarray(g["start_frame"]), end=np.asarray(g["end_frame"])))
 
     results = {}
-    variants = _prompts(cfg, rollouts[0]["instruction"], top, bottom)
+    # NOTE: goal_generator.get_instruction() returns raw geom IDs ("the 64"),
+    # a latent upstream bug; build the instruction from config block names.
+    instruction = f"Stack the {top} on top of the {bottom}"
+    variants = _prompts(cfg, instruction, top, bottom)
     for vname, pair, question in variants:
         scores = np.zeros(len(rollouts))
         masses = np.zeros(len(rollouts))
