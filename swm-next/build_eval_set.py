@@ -41,6 +41,9 @@ def main():
     ap.add_argument("--colors", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--per-cell", type=int, default=1000)
+    ap.add_argument("--no-balance", action="store_true",
+                    help="cells are question types only (natural yes/no mix) "
+                         "instead of (type x answer)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -66,7 +69,8 @@ def main():
                 i0, i1 = int(d["start_idx"][()]), int(d["end_idx"][()])
                 h = int(hname.split("_")[-1])
                 for qi in range(len(qs)):
-                    key = (_s(typs[qi]), bool(ans[qi]))
+                    key = ((_s(typs[qi]),) if args.no_balance
+                           else (_s(typs[qi]), bool(ans[qi])))
                     counts[key] = counts.get(key, 0) + 1
                     row = (tname, i0, i1, h, _s(qs[qi]), bool(ans[qi]),
                            _s(typs[qi]), float(p[qi]))
@@ -142,10 +146,12 @@ def main():
         out.attrs["source"] = args.hdf5
         out.attrs["seed"] = args.seed
         out.attrs["per_cell"] = args.per_cell
+        out.attrs["balanced_answers"] = not args.no_balance
 
     for key in sorted(counts):
         got = len(reservoirs.get(key, []))
-        print(f"{key[0]:26s} yes={key[1]!s:5s} pool={counts[key]:9,} sampled={got}")
+        tag = f"yes={key[1]!s:5s}" if len(key) > 1 else "natural  "
+        print(f"{key[0]:26s} {tag} pool={counts[key]:9,} sampled={got}")
     print("DONE:", args.out)
 
 
