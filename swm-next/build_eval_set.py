@@ -88,7 +88,7 @@ def main():
     def margin(tname, i0, i1, qtype, q):
         ti = tname.split("_")[-1]
         cmap = {c: i for i, c in enumerate(colors[ti])}
-        names = re.findall(r"(red|green|blue|yellow) cube", q.lower())
+        names = re.findall(r"(red|green|blue|yellow|orange|purple) cube", q.lower())
         try:
             eef = poses[f"{tname}_eef"]
             blk = [poses[f"{tname}_block_{i}"] for i in range(4)]
