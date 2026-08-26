@@ -178,12 +178,18 @@ class OpenAIBackend:
     VARIANTS_YES = ("yes", " yes", "Yes", " Yes", "YES")
     VARIANTS_NO = ("no", " no", "No", " No", "NO")
 
+    # promo $/M through 2026-11 (input, output)
+    PRICES = {"gpt-5.6-luna": (0.20, 1.20), "gpt-5.6-sol": (4.00, 20.00)}
+
     def __init__(self, model_id: str, concurrency: int = 8):
         import os
+        import threading
         from openai import OpenAI
         self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         self.model_id = model_id
         self.concurrency = concurrency
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        self._ulock = threading.Lock()
 
     @staticmethod
     def _data_url(arr):
@@ -211,6 +217,10 @@ class OpenAIBackend:
             model=self.model_id,
             messages=[{"role": "user", "content": content}],
             max_completion_tokens=16, reasoning_effort="none")
+        if r.usage is not None:
+            with self._ulock:
+                self.usage["prompt_tokens"] += r.usage.prompt_tokens
+                self.usage["completion_tokens"] += r.usage.completion_tokens
         text = (r.choices[0].message.content or "").strip().lower()
         if text.startswith("yes"):
             return 1.0, 1.0
@@ -222,7 +232,13 @@ class OpenAIBackend:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=self.concurrency) as ex:
             out = list(ex.map(self._one, items))
+        pin, pout = self.PRICES.get(self.model_id, (0.0, 0.0))
+        cost = (self.usage["prompt_tokens"] * pin +
+                self.usage["completion_tokens"] * pout) / 1e6
+        print(f"[usage] in={self.usage['prompt_tokens']:,} "
+              f"out={self.usage['completion_tokens']:,} est=${cost:.2f}", flush=True)
         return (np.array([o[0] for o in out]), np.array([o[1] for o in out]))
 
 
 BACKENDS["gpt-5.6-luna"] = lambda dev: OpenAIBackend("gpt-5.6-luna")
+BACKENDS["gpt-5.6-sol"] = lambda dev: OpenAIBackend("gpt-5.6-sol")
