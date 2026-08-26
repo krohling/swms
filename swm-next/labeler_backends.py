@@ -167,3 +167,62 @@ BACKENDS = {
     "paligemma-3b-base": lambda dev: PaliGemmaBaseBackend(device=dev),
     "paligemma-wm": lambda dev: PaliGemmaWMBackend("ckpts/paligemma_wm_ogbench", device=dev),
 }
+
+
+class OpenAIBackend:
+    """API models (GPT-5.6 Luna etc.) via chat completions with logprobs.
+    p_yes pooled over yes/no variants found in top_logprobs of the answer
+    token, renormalized; mass = combined yes+no probability found there.
+    Images sent as base64 data URLs at detail:'high' (224px = 1 tile)."""
+
+    VARIANTS_YES = ("yes", " yes", "Yes", " Yes", "YES")
+    VARIANTS_NO = ("no", " no", "No", " No", "NO")
+
+    def __init__(self, model_id: str, concurrency: int = 8):
+        import os
+        from openai import OpenAI
+        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.model_id = model_id
+        self.concurrency = concurrency
+
+    @staticmethod
+    def _data_url(arr):
+        import base64
+        import io
+        buf = io.BytesIO()
+        Image.fromarray(arr).save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    def _one(self, it):
+        pair = it["qtype"] in CLOSER
+        content = []
+        if pair:
+            content += [{"type": "image_url", "image_url": {"url": self._data_url(it["start"]), "detail": "high"}},
+                        {"type": "image_url", "image_url": {"url": self._data_url(it["end"]), "detail": "high"}}]
+            text = f"{PAIR_PREAMBLE}{it['question']} Answer with one word: yes or no."
+        else:
+            content += [{"type": "image_url", "image_url": {"url": self._data_url(it["end"]), "detail": "high"}}]
+            text = f"{it['question']} Answer with one word: yes or no."
+        content.append({"type": "text", "text": text})
+        # Luna (gpt-5.x reasoning family) supports neither temperature nor
+        # logprobs: parse the generated word instead. Hard 0/1 p_yes; mass=1
+        # when an answer parses, 0 otherwise (those score as abstentions).
+        r = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=[{"role": "user", "content": content}],
+            max_completion_tokens=16, reasoning_effort="none")
+        text = (r.choices[0].message.content or "").strip().lower()
+        if text.startswith("yes"):
+            return 1.0, 1.0
+        if text.startswith("no"):
+            return 0.0, 1.0
+        return 0.5, 0.0
+
+    def score(self, items):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=self.concurrency) as ex:
+            out = list(ex.map(self._one, items))
+        return (np.array([o[0] for o in out]), np.array([o[1] for o in out]))
+
+
+BACKENDS["gpt-5.6-luna"] = lambda dev: OpenAIBackend("gpt-5.6-luna")
