@@ -7,7 +7,7 @@ color is the cube). Qwen3-VL is prompted for a bounding box per named cube;
 we score detection rate, center-in-blob rate, center offset, and IoU vs the
 HSV bbox, at both 224 and 768 for the same items.
 
-    python swm-next/grounding_audit.py --artifact224 saqa_eval_12k.h5 \
+    python swm-next/labeler_eval/grounding_audit.py --artifact224 saqa_eval_12k.h5 \
         --artifact768 saqa_eval_12k_768.h5 --colors noisy-fixed.poses.colors.json \
         --n 100 [--device mps]
 """

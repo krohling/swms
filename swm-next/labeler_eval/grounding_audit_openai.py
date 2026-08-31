@@ -1,12 +1,21 @@
 """Sol/OpenAI variant of the grounding audit: same frames, boxes via API,
 scored against pose-projected ground truth inline."""
-import argparse, base64, io, json, os, re, sys
+import argparse, base64, io, json, os, re
 import h5py
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "ogbench"))
+
+def make_env():
+    """visual-cube-quadruple env exactly as collected (224, data_collection)."""
+    import gymnasium
+    import ogbench  # noqa: F401  (env registration)
+    return gymnasium.make(
+        "visual-cube-quadruple-v0", terminate_at_goal=False, visualize_info=False,
+        mode="data_collection", max_episode_steps=1000,
+        stack_goal=None, width=224, height=224, control_timestep=0.1, ood=False,
+    )
 
 
 def data_url(arr):
@@ -28,7 +37,6 @@ def main():
 
     from openai import OpenAI
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    from replay_extract_poses import make_env
     env = make_env(); env.reset(seed=0)
     P = env.unwrapped.get_camera_matrices()
     poses = np.load(args.poses)

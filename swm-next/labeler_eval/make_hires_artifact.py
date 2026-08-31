@@ -5,7 +5,7 @@ all preserved byte-for-byte) and replaces start/end frames with renders from
 the resolution-swapped dataset -- the identical question set at a different
 resolution, for a controlled resolution arm.
 
-    python swm-next/make_hires_artifact.py --artifact saqa_eval_12k.h5 \
+    python swm-next/labeler_eval/make_hires_artifact.py --artifact saqa_eval_12k.h5 \
         --frames-hdf5 noisy-fixed-768.hdf5 --out saqa_eval_12k_768.h5
 """
 from __future__ import annotations

@@ -6,7 +6,7 @@ per-question correctness) -- the two decision metrics from the failure-mode
 analysis: distance to the 95% gate per type, and whether the model has any
 signal on the 'closer' comparison task.
 
-    python swm-next/run_saqa_eval.py --artifact saqa_eval_12k.h5 \
+    python swm-next/labeler_eval/run_saqa_eval.py --artifact saqa_eval_12k.h5 \
         --backend qwen3-vl-8b [--device mps] [--batch 8] [--limit 0] \
         [--out results/]
 """

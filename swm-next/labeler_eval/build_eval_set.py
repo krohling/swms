@@ -11,7 +11,7 @@ Margins (from replayed poses; NaN where entities can't be parsed):
   closer types:  |d(start) - d(end)| between the two named entities
   contact/state: entity separation at the END frame
 
-    python swm-next/build_eval_set.py --hdf5 noisy-fixed.hdf5 \
+    python swm-next/labeler_eval/build_eval_set.py --hdf5 noisy-fixed.hdf5 \
         --teacher noisy-fixed.teacher.hdf5 --poses noisy-fixed.poses.npz \
         --colors noisy-fixed.poses.colors.json --out saqa_eval_12k.h5 \
         [--per-cell 1000] [--seed 0]

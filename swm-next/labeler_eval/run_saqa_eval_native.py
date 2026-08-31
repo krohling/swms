@@ -8,7 +8,7 @@ This is the control for the labeler-protocol runs (run_saqa_eval.py), which
 feed the END frame with no actions: differences between the two isolate
 protocol effects from capability.
 
-    python swm-next/run_saqa_eval_native.py --artifact saqa_eval_12k.h5 \
+    python swm-next/labeler_eval/run_saqa_eval_native.py --artifact saqa_eval_12k.h5 \
         --hdf5 noisy-fixed.hdf5 --checkpoint ckpts/paligemma_wm_ogbench \
         --name pgwm-published [--device mps] [--batch 8] [--limit 0]
 """
