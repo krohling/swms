@@ -65,6 +65,8 @@ class SolGrounder:
         from openai import OpenAI
         self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         self.model_id = model_id
+        import threading
+        self._lock = threading.Lock()
         self.cache_path = cache_path
         self.cache = {}
         if os.path.exists(cache_path):
@@ -97,15 +99,15 @@ class SolGrounder:
             box = [int(x) for x in m.groups()]
             if max(box) > H:
                 box = [b * H / 1000.0 for b in box]
-        self.cache[key] = box
-        self._dirty += 1
-        if self._dirty >= 50:
-            self.flush()
+        with self._lock:
+            self.cache[key] = box
+            self._dirty += 1
         return box
 
     def flush(self):
-        json.dump(self.cache, open(self.cache_path, "w"))
-        self._dirty = 0
+        with self._lock:
+            json.dump(self.cache, open(self.cache_path, "w"))
+            self._dirty = 0
 
 
 class LunaGrounder(SolGrounder):
@@ -146,6 +148,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--margin", type=float, default=1.0)
     ap.add_argument("--crop-size", type=int, default=448)
+    ap.add_argument("--ground-concurrency", type=int, default=32)
     ap.add_argument("--box-scale", type=float, default=1.0,
                     help="divide cached/queried boxes by this factor (use when "
                          "the box cache was built at a different resolution, "
@@ -165,6 +168,36 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     grounder = GROUNDERS[args.grounder](
         os.path.join(args.out, f"ground_cache_{args.grounder}.json"))
+
+    # Prefetch all needed boxes concurrently (grounding is API-latency bound;
+    # results land in the same cache the sequential path reads).
+    from concurrent.futures import ThreadPoolExecutor
+    jobs = {}
+    for i in range(n):
+        q = f["questions"][i].decode()
+        qtype = f["qtypes"][i].decode()
+        tname, i0, i1 = f["provenance"][i].decode().split(":")
+        for e in parse_entities(q, qtype):
+            jobs.setdefault(f"{tname}:{i1}:{e}", (i, "end", e))
+            if qtype in CLOSER:
+                jobs.setdefault(f"{tname}:{i0}:{e}", (i, "start", e))
+    todo = [(k, v) for k, v in jobs.items() if k not in grounder.cache]
+    print(f"prefetching {len(todo)} uncached boxes ({len(jobs)} needed) "
+          f"at concurrency {args.ground_concurrency}", flush=True)
+
+    def _fetch(job):
+        key, (i, which, e) = job
+        frame = np.asarray(f[("start_frames" if which == "start" else "end_frames")][i])
+        return grounder.box(frame, e, key)
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=args.ground_concurrency) as ex:
+        for _ in ex.map(_fetch, todo):
+            done += 1
+            if done % 500 == 0:
+                grounder.flush()
+                print(f"prefetched {done}/{len(todo)}", flush=True)
+    grounder.flush()
 
     items, flags = [], []
     for i in range(n):
