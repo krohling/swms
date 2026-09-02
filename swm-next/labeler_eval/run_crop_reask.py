@@ -108,7 +108,12 @@ class SolGrounder:
         self._dirty = 0
 
 
-GROUNDERS = {"sol": SolGrounder}
+class LunaGrounder(SolGrounder):
+    def __init__(self, cache_path):
+        super().__init__(cache_path, model_id="gpt-5.6-luna")
+
+
+GROUNDERS = {"sol": SolGrounder, "luna": LunaGrounder}
 
 
 def union_crop(frame: np.ndarray, boxes: list, margin_cw: float, crop_size: int):
