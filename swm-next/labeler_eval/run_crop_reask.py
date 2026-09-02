@@ -141,6 +141,11 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--margin", type=float, default=1.0)
     ap.add_argument("--crop-size", type=int, default=448)
+    ap.add_argument("--box-scale", type=float, default=1.0,
+                    help="divide cached/queried boxes by this factor (use when "
+                         "the box cache was built at a different resolution, "
+                         "e.g. 768/224=3.4286 for 224 artifacts; only safe when "
+                         "all needed boxes are already cached)")
     ap.add_argument("--preview", type=int, default=0,
                     help="ground+crop N questions, write crop cards, answer NOTHING")
     ap.add_argument("--out", default="labeler_eval_results_v2")
@@ -166,10 +171,12 @@ def main():
         start = np.asarray(f["start_frames"][i])
         end = np.asarray(f["end_frames"][i])
         pair = qtype in CLOSER
-        boxes_end = [grounder.box(end, e, f"{tname}:{i1}:{e}") for e in ents]
+        def scaled(b):
+            return [v / args.box_scale for v in b] if (b and args.box_scale != 1.0) else b
+        boxes_end = [scaled(grounder.box(end, e, f"{tname}:{i1}:{e}")) for e in ents]
         boxes = [b for b in boxes_end if b]
         if pair:
-            boxes_start = [grounder.box(start, e, f"{tname}:{i0}:{e}") for e in ents]
+            boxes_start = [scaled(grounder.box(start, e, f"{tname}:{i0}:{e}")) for e in ents]
             boxes += [b for b in boxes_start if b]
         ok = len([b for b in boxes_end if b]) == len(ents) and \
             (not pair or len([b for b in boxes_start if b]) == len(ents))
