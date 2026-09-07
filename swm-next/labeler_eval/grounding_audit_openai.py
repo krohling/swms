@@ -36,7 +36,15 @@ def main():
     args = ap.parse_args()
 
     from openai import OpenAI
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    if args.model.startswith("gemini"):
+        from labeler_backends import GEMINI_OPENAI_URL, GEMINI_KWARGS
+        client = OpenAI(api_key=os.environ["GEMINI_API_KEY"],
+                        base_url=GEMINI_OPENAI_URL)
+        create_kwargs = dict(GEMINI_KWARGS)
+        create_kwargs["max_completion_tokens"] = 256
+    else:
+        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        create_kwargs = dict(max_completion_tokens=64, reasoning_effort="none")
     env = make_env(); env.reset(seed=0)
     P = env.unwrapped.get_camera_matrices()
     poses = np.load(args.poses)
@@ -53,21 +61,44 @@ def main():
         if len(picks) >= args.n:
             break
 
+    gemini = args.model.startswith("gemini")
+
     def ask(frame, color):
+        import time
         H = frame.shape[0]
-        r = client.chat.completions.create(model=args.model, messages=[{
-            "role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": data_url(frame), "detail": "high"}},
-                {"type": "text", "text":
-                 f"The image is {H}x{H} pixels. Locate the {color} cube. "
-                 "Respond with only JSON, pixel coordinates: "
-                 "{\"bbox_2d\": [x1, y1, x2, y2]}"}]},
-        ], max_completion_tokens=64, reasoning_effort="none")
+        if gemini:
+            # Gemini's native detection format; asking for x1y1x2y2 pixels is
+            # silently answered in [ymin,xmin,ymax,xmax] anyway (pixel-valued
+            # at 224 but 0-1000-normalized at 768), so request the native
+            # convention explicitly and convert deterministically.
+            text = (f"Locate the {color} cube. Respond with only JSON: "
+                    "{\"box_2d\": [ymin, xmin, ymax, xmax]} "
+                    "with coordinates normalized to 0-1000.")
+        else:
+            text = (f"The image is {H}x{H} pixels. Locate the {color} cube. "
+                    "Respond with only JSON, pixel coordinates: "
+                    "{\"bbox_2d\": [x1, y1, x2, y2]}")
+        for attempt in range(6):
+            try:
+                r = client.chat.completions.create(model=args.model, messages=[{
+                    "role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": data_url(frame), "detail": "high"}},
+                        {"type": "text", "text": text}]},
+                ], **create_kwargs)
+                break
+            except Exception as e:
+                if "429" in str(e) and attempt < 5:
+                    time.sleep(20 * (attempt + 1))
+                    continue
+                raise
         m = re.search(r"\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]",
                       r.choices[0].message.content or "")
         if not m:
             return None
         box = [int(x) for x in m.groups()]
+        if gemini:
+            ymin, xmin, ymax, xmax = [b * H / 1000.0 for b in box]
+            return [xmin, ymin, xmax, ymax]
         if max(box) > H:
             box = [b * H / 1000.0 for b in box]
         return box
