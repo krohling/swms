@@ -173,3 +173,10 @@ docs/
 
 # our source lives under swm-next/ (the data/ rule above is for datasets)
 !swm-next/data/
+
+# local eval outputs (belong in workspace/eval-outputs/, never in history)
+labeler_eval_results*/
+gemini_batch_*/
+grounding_audit*.json
+outputs_verifier/
+.DS_Store
