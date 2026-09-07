@@ -16,3 +16,6 @@ actions_per_cycle: 4           # matches eval protocol num_actions_executed
 # verification (Stage B)
 model_id: Qwen/Qwen3-VL-8B-Instruct
 batch: 8
+
+# incremental sweep (verifier_sweep.py) — horizons in replan cycles
+horizons: [1, 2, 4, 8, 16, 32, 50]
