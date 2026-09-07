@@ -13,12 +13,12 @@ rollouts per seed are scored at time t and we report:
     auc           -- rank-AUC of score vs eventual success, all rollouts
     n_terminated  -- rollouts already past their oracle-success cycle at t
 
-Needs a bank from verifier_capture.py (per-cycle frames). Successful rollouts
+Needs a bank from verifier/capture.py (per-cycle frames). Successful rollouts
 end early; their last frame persists for later horizons.
 
 Usage (repo root on PYTHONPATH):
 
-    python swm-next/verifier_sweep.py --config swm-next/configs/verifier.yaml
+    PYTHONPATH=$PWD:$PWD/swm-next python swm-next/verifier/sweep.py --config swm-next/configs/verifier.yaml
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def load_bank(path: str) -> list[Rollout]:
             if "cycle_frames" not in g:
                 raise RuntimeError(
                     f"{name} lacks cycle_frames -- bank was made by the old "
-                    "capture; re-run verifier_capture.py")
+                    "capture; re-run verifier/capture.py")
             rollouts.append(Rollout(
                 seed=int(g.attrs["seed"]), k=int(g.attrs["k"]),
                 success=bool(g.attrs["success"]),

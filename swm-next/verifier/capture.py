@@ -18,7 +18,7 @@ frames; consumers should treat its last frame as persisting afterward.
 
 Usage (repo root on PYTHONPATH):
 
-    python swm-next/verifier_capture.py --config swm-next/configs/verifier.yaml
+    PYTHONPATH=$PWD python swm-next/verifier/capture.py --config swm-next/configs/verifier.yaml
 """
 from __future__ import annotations
 
