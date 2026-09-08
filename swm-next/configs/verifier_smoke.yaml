@@ -1,17 +1,17 @@
 # Verifier-planning experiment (Kevin, 2026-08-23): can zero-shot Qwen select
 # successful base-policy rollouts? Local run (macOS/MPS); harness validated by
 # base-policy sanity eval reproducing the cluster's 52% exactly.
-out_dir: outputs_verifier
+out_dir: outputs_verifier_smoke
 device: mps
 
 # rollouts (Stage A)
 seed_start: 6000
-num_seeds: 50
+num_seeds: 5
 k_rollouts: 8
 block_combo: [blue_cube, green_cube]
 diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
 max_cycles: 50                 # matches eval protocol num_steps
-capture_workers: 8             # parallel rollout workers (1 = sequential)
+capture_workers: 4             # parallel rollout workers (1 = sequential)
 arm_alpha: 0.1                 # arm opacity; 0.1 = OGBench default, 1.0 = opaque
 actions_per_cycle: 4           # matches eval protocol num_actions_executed
 
