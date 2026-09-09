@@ -62,8 +62,9 @@ class SolGrounder:
     """GPT-5.6 Sol boxes with a persistent on-disk cache."""
 
     def __init__(self, cache_path: str, model_id: str = "gpt-5.6-sol"):
-        from openai import OpenAI
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        # Client is created lazily on the first cache miss: fully-cached runs
+        # must not require an API key.
+        self._client = None
         self.model_id = model_id
         import threading
         self._lock = threading.Lock()
@@ -85,7 +86,10 @@ class SolGrounder:
         H = frame.shape[0]
         target = f"the {entity}" if entity != "gripper" else \
             "the robot gripper (the purple/magenta end-effector)"
-        r = self.client.chat.completions.create(
+        if self._client is None:
+            from openai import OpenAI
+            self._client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        r = self._client.chat.completions.create(
             model=self.model_id, messages=[{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": self._data_url(frame), "detail": "high"}},
                 {"type": "text", "text":
