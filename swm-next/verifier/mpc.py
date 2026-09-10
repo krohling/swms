@@ -98,11 +98,30 @@ def run_episode(env, goal, judge, cfg, args, questions, seed):
         else:
             saved = env.get_state()
             end_frames = []
-            for c in candidates:
+            for ci, c in enumerate(candidates):
                 env.set_state(saved)
                 f = frame
+                deep = args.lookahead > len(c)
+                if deep:
+                    from collections import deque
+                    with policy._lock:
+                        buf = deque(policy.obs_deque, maxlen=policy.obs_deque.maxlen)
                 for a in c:
                     f = env.step(np.asarray(a))
+                    if deep:
+                        policy.add_obs(f)
+                done_steps = len(c)
+                while done_steps < args.lookahead:
+                    torch.manual_seed(hash((seed, cycle, ci, done_steps)) % 2**31)
+                    chunk = policy.get_action()
+                    for a in chunk[: args.lookahead - done_steps]:
+                        f = env.step(np.asarray(a))
+                        policy.add_obs(f)
+                    done_steps += min(len(chunk), args.lookahead - done_steps)
+                if deep:
+                    with policy._lock:
+                        policy.obs_deque.clear()
+                        policy.obs_deque.extend(buf)
                 end_frames.append(np.asarray(f, dtype=np.uint8))
             env.set_state(saved)
             scores = score_candidates(judge, args.scorer, phase, questions,
@@ -129,6 +148,10 @@ def main():
     ap.add_argument("--config", required=True)
     ap.add_argument("--k", type=int, default=8)
     ap.add_argument("--scorer", choices=["phase", "progress"], default="phase")
+    ap.add_argument("--lookahead", type=int, default=16,
+                    help="virtual rollout depth in env steps; beyond the "
+                         "16-step candidate chunk the policy continues the "
+                         "rollout closed-loop (resampled every 16 steps)")
     ap.add_argument("--seeds", type=int, default=25)
     ap.add_argument("--out", default="outputs_verifier_mpc")
     args = ap.parse_args()
@@ -157,9 +180,10 @@ def main():
               f"{'success' if success else 'fail'} @ cycle {cycles} "
               f"(running SR {wins/(i+1):.0%})", flush=True)
 
-    out = dict(k=args.k, scorer=args.scorer, n=args.seeds,
-               sr=wins / args.seeds, episodes=results)
-    path = os.path.join(args.out, f"mpc_{args.scorer}_k{args.k}.json")
+    out = dict(k=args.k, scorer=args.scorer, lookahead=args.lookahead,
+               n=args.seeds, sr=wins / args.seeds, episodes=results)
+    path = os.path.join(args.out,
+                        f"mpc_{args.scorer}_k{args.k}_L{args.lookahead}.json")
     json.dump(out, open(path, "w"), indent=1)
     print(f"MPC_DONE: SR {wins}/{args.seeds} = {wins/args.seeds:.0%} -> {path}",
           flush=True)
