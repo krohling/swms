@@ -178,16 +178,24 @@ class OpenAIBackend:
     VARIANTS_YES = ("yes", " yes", "Yes", " Yes", "YES")
     VARIANTS_NO = ("no", " no", "No", " No", "NO")
 
-    # promo $/M through 2026-11 (input, output)
-    PRICES = {"gpt-5.6-luna": (0.20, 1.20), "gpt-5.6-sol": (4.00, 20.00)}
+    # promo $/M through 2026-11 (input, output); gemini standard tier
+    PRICES = {"gpt-5.6-luna": (0.20, 1.20), "gpt-5.6-sol": (4.00, 20.00),
+              "gemini-3.1-pro-preview": (2.00, 12.00),
+              "gemini-3.8-flash": (0.75, 3.75)}
 
-    def __init__(self, model_id: str, concurrency: int = 8):
+    def __init__(self, model_id: str, concurrency: int = 8,
+                 base_url: str = None, key_env: str = "OPENAI_API_KEY",
+                 create_kwargs: dict = None):
         import os
         import threading
         from openai import OpenAI
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.client = OpenAI(api_key=os.environ[key_env], base_url=base_url)
         self.model_id = model_id
         self.concurrency = concurrency
+        # gpt-5.x reasoning family: thinking off. Gemini 3.x pro cannot
+        # disable thinking; caller passes a minimal-budget config instead.
+        self.create_kwargs = create_kwargs if create_kwargs is not None else \
+            dict(max_completion_tokens=16, reasoning_effort="none")
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
         self._ulock = threading.Lock()
 
@@ -213,10 +221,19 @@ class OpenAIBackend:
         # Luna (gpt-5.x reasoning family) supports neither temperature nor
         # logprobs: parse the generated word instead. Hard 0/1 p_yes; mass=1
         # when an answer parses, 0 otherwise (those score as abstentions).
-        r = self.client.chat.completions.create(
-            model=self.model_id,
-            messages=[{"role": "user", "content": content}],
-            max_completion_tokens=16, reasoning_effort="none")
+        import time
+        for attempt in range(6):
+            try:
+                r = self.client.chat.completions.create(
+                    model=self.model_id,
+                    messages=[{"role": "user", "content": content}],
+                    **self.create_kwargs)
+                break
+            except Exception as e:
+                if "429" in str(e) and attempt < 5:
+                    time.sleep(20 * (attempt + 1))
+                    continue
+                raise
         if r.usage is not None:
             with self._ulock:
                 self.usage["prompt_tokens"] += r.usage.prompt_tokens
@@ -242,3 +259,17 @@ class OpenAIBackend:
 
 BACKENDS["gpt-5.6-luna"] = lambda dev: OpenAIBackend("gpt-5.6-luna")
 BACKENDS["gpt-5.6-sol"] = lambda dev: OpenAIBackend("gpt-5.6-sol")
+
+GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# 3.1 pro refuses thinking_budget 0; 128 is the documented minimum. Thinking
+# tokens bill as output, so budget must stay small for cost predictability.
+GEMINI_KWARGS = dict(
+    max_completion_tokens=256,
+    extra_body={"extra_body": {"google": {
+        "thinking_config": {"thinking_budget": 128, "include_thoughts": False}}}})
+BACKENDS["gemini-3.1-pro"] = lambda dev: OpenAIBackend(
+    "gemini-3.1-pro-preview", base_url=GEMINI_OPENAI_URL,
+    key_env="GEMINI_API_KEY", create_kwargs=GEMINI_KWARGS)
+BACKENDS["gemini-3.8-flash"] = lambda dev: OpenAIBackend(
+    "gemini-3.8-flash", base_url=GEMINI_OPENAI_URL,
+    key_env="GEMINI_API_KEY", create_kwargs=GEMINI_KWARGS)
