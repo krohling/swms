@@ -118,20 +118,30 @@ def main():
     positions = list(range(0, max_steps + 1, stride))
 
     # row r of every matrix = traj_ids[r]; column axes below
+    out_npz = os.path.join(cfg["out_dir"], "scores.npz")
     arrays = {"traj_ids": np.array([r.name for r in rollouts]),
               "positions": np.array(positions),
               "alive": np.array([[p <= r.steps for p in positions]
                                  for r in rollouts])}
+    # Resume support: carry over questions already scored in a previous
+    # (interrupted) run and skip them; save incrementally per question.
+    if os.path.exists(out_npz):
+        prev = np.load(out_npz)
+        arrays.update({k: prev[k] for k in prev.files})
     R, P = len(rollouts), len(positions)
 
     for q in cfg["questions"]:
         name, text = q["name"], fill(q["text"], cfg)
+        if f"{name}/p" in arrays or f"{name}/h{h_values[0] if h_values else 0}/p" in arrays:
+            print(f"[{name}] already scored, skipping", flush=True)
+            continue
         if not q.get("pair", False):
             images = [r.frame_at(p) for r in rollouts for p in positions]
             p_yes, mass = score_all(judge, images, text, batch)
             arrays[f"{name}/p"] = p_yes.reshape(R, P)
             arrays[f"{name}/mass"] = mass.reshape(R, P)
-            print(f"[{name}] {R * P} single-frame evals done", flush=True)
+            np.savez_compressed(out_npz, **arrays)
+            print(f"[{name}] {R * P} single-frame evals done (saved)", flush=True)
         else:
             for h in h_values:
                 starts = [p for p in positions if p + h <= max_steps]
@@ -141,10 +151,11 @@ def main():
                 arrays[f"{name}/h{h}/p"] = p_yes.reshape(R, len(starts))
                 arrays[f"{name}/h{h}/mass"] = mass.reshape(R, len(starts))
                 arrays[f"{name}/h{h}/window_starts"] = np.array(starts)
-                print(f"[{name}] h={h}: {R * len(starts)} window evals done",
+                np.savez_compressed(out_npz, **arrays)
+                print(f"[{name}] h={h}: {R * len(starts)} window evals done (saved)",
                       flush=True)
 
-    np.savez_compressed(os.path.join(cfg["out_dir"], "scores.npz"), **arrays)
+    np.savez_compressed(out_npz, **arrays)
     manifest = dict(
         config=cfg, positions=positions, h_values=h_values,
         window_starts={h: [p for p in positions if p + h <= max_steps]
