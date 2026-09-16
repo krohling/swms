@@ -150,7 +150,7 @@ def main() -> None:
         per_device_train_batch_size=micro,
         gradient_accumulation_steps=accum,
         learning_rate=float(cfg["learning_rate"]),
-        lr_scheduler_type="linear",                  # matches train.py (A.1)
+        lr_scheduler_type=cfg.get("lr_scheduler_type", "linear"),  # linear matches train.py (A.1)
         # Trainer defaults made explicit, mirroring train.py.
         warmup_steps=int(cfg.get("warmup_steps", 0)),
         max_grad_norm=float(cfg.get("max_grad_norm", 1.0)),
@@ -168,10 +168,42 @@ def main() -> None:
         seed=int(cfg["seed"]),
     )
 
+    class ForceLR(TrainerCallback):
+        """Pin the LR after checkpoint states load. On resume,
+        optimizer/scheduler load_state_dict restores the ORIGINAL base LR
+        (e.g. 1e-4) regardless of TrainingArguments.learning_rate, which
+        under a constant schedule would silently train at the old peak.
+        Applied at train begin and again at the first step for safety."""
+
+        def __init__(self, lr):
+            self.lr = float(lr)
+            self._applied = False
+
+        def _apply(self, kwargs):
+            opt = kwargs.get("optimizer")
+            sch = kwargs.get("lr_scheduler")
+            if opt is not None:
+                for g in opt.param_groups:
+                    g["lr"] = self.lr
+                    g["initial_lr"] = self.lr
+            if sch is not None and hasattr(sch, "base_lrs"):
+                sch.base_lrs = [self.lr] * len(sch.base_lrs)
+
+        def on_train_begin(self, args, state, control, **kwargs):
+            self._apply(kwargs)
+
+        def on_step_begin(self, args, state, control, **kwargs):
+            if not self._applied:
+                self._apply(kwargs)
+                self._applied = True
+
+    callbacks = [EvalCallback()]
+    if cfg.get("force_lr"):
+        callbacks.append(ForceLR(cfg["force_lr"]))
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds,
                       data_collator=make_collator(processor, placeholder,
                                                   int(cfg["action_dim"])),
-                      callbacks=[EvalCallback()])
+                      callbacks=callbacks)
     trainer.train(resume_from_checkpoint=resume)
     trainer.save_model(os.path.join(out_dir, "final"))
     print("TRAINING_DONE", flush=True)
