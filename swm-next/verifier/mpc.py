@@ -80,6 +80,13 @@ def build_questions(cfg):
         progress=(f"The robot was instructed to: Stack the {top} on top of "
                   f"the {bottom}. Is the robot closer to completing this "
                   "task than in the first image?"),
+        # shaped candidates (question-screen set)
+        near=f"Is the gripper near the {top}?",
+        above_cube=f"Is the gripper directly above the {top}?",
+        touching=f"Is the gripper touching the {top}?",
+        lifted=f"Is the {top} lifted off the table?",
+        above_goal=f"Is the {top} directly above the {bottom}?",
+        close_goal=f"Is the {top} close to the {bottom}?",
     )
 
 
@@ -95,6 +102,9 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames, batch
     if scorer == "progress":
         pairs = [(current, f) for f in end_frames]
         return ask(pairs, questions["progress"])
+    if scorer.startswith("q:"):
+        # single fixed question, no phase machinery
+        return ask(end_frames, questions[scorer[2:]])
     if phase == 0:
         return ask(end_frames, questions["grasp"])
     return (0.6 * ask(end_frames, questions["ontop"])
@@ -177,7 +187,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
     ap.add_argument("--k", type=int, default=8)
-    ap.add_argument("--scorer", choices=["phase", "progress"], default="phase")
+    ap.add_argument("--scorer", default="phase",
+                    help="phase | progress | q:<name> for a single fixed "
+                         "question (e.g. q:above_cube), no phase machinery")
     ap.add_argument("--lookahead", type=int, default=16,
                     help="virtual rollout depth in env steps; beyond the "
                          "16-step candidate chunk the policy continues the "
@@ -212,8 +224,9 @@ def main():
 
     out = dict(k=args.k, scorer=args.scorer, lookahead=args.lookahead,
                n=args.seeds, sr=wins / args.seeds, episodes=results)
+    tag = args.scorer.replace(":", "_")
     path = os.path.join(args.out,
-                        f"mpc_{args.scorer}_k{args.k}_L{args.lookahead}.json")
+                        f"mpc_{tag}_k{args.k}_L{args.lookahead}.json")
     json.dump(out, open(path, "w"), indent=1)
     print(f"MPC_DONE: SR {wins}/{args.seeds} = {wins/args.seeds:.0%} -> {path}",
           flush=True)
