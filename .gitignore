@@ -173,3 +173,6 @@ docs/
 
 # our source lives under swm-next/ (the data/ rule above is for datasets)
 !swm-next/data/
+
+# local verifier-MPC outputs
+outputs_verifier_mpc/
