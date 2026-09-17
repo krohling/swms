@@ -98,12 +98,19 @@ def load_spec(path, cfg):
     top, bottom = [b.replace("_", " ") for b in cfg["block_combo"]]
     fill = lambda s: s.replace("{top}", top).replace("{bottom}", bottom)
     raw = yaml.safe_load(open(path))
+    tr = raw["transition"]
+    # transition: single question {text, threshold} or weighted set
+    # {questions: [{text, weight}, ...], threshold}
+    if "questions" in tr:
+        tq = [(fill(q["text"]), float(q["weight"])) for q in tr["questions"]]
+    else:
+        tq = [(fill(tr["text"]), 1.0)]
     spec = dict(
         name=raw["name"],
         phase0=[(fill(q["text"]), float(q["weight"])) for q in raw["phase0"]],
         phase1=[(fill(q["text"]), float(q["weight"])) for q in raw["phase1"]],
-        transition=fill(raw["transition"]["text"]),
-        threshold=float(raw["transition"].get("threshold", 0.9)),
+        transition=tq,
+        threshold=float(tr.get("threshold", 0.9)),
     )
     return spec
 
@@ -210,13 +217,18 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
         # StackBlocksGoal defaults).
         trans_info = None
         if phase == 0 and (spec is not None or args.scorer == "phase"):
-            tq = spec["transition"] if spec else questions["grasp"]
+            tqs = spec["transition"] if spec else [(questions["grasp"], 1.0)]
             th = spec["threshold"] if spec else PHASE_THRESHOLD
             tframe = judge_view.render() if judge_view else frame
-            p_t, _ = judge.p_yes([tframe], [tq])
-            fired = float(p_t[0]) > th
-            trans_info = dict(question=tq, p=round(float(p_t[0]), 4),
-                              threshold=th, fired=fired)
+            total, parts = 0.0, {}
+            for q, w in tqs:
+                p_t, _ = judge.p_yes([tframe], [q])
+                parts[q] = round(float(p_t[0]), 4)
+                total += w * float(p_t[0])
+            fired = total > th
+            trans_info = dict(questions={q: dict(weight=w, p=parts[q])
+                                         for q, w in tqs},
+                              p=round(total, 4), threshold=th, fired=fired)
             if ep_dir is not None:
                 save_png(tframe, os.path.join(ep_dir, f"c{cycle:02d}_transition.png"))
             if fired:

@@ -1,0 +1,14 @@
+# Planning objective with a stricter two-part transition gate: enclosure
+# poses score ~0.9 on grasp alone (opaque-judge false positives); requiring
+# lift evidence too kills those while real grasp+lift passes both.
+name: planning_lift_transition
+phase0:
+  - {text: "Is the robot grasping the {top}?", weight: 1.0}
+transition:
+  questions:
+    - {text: "Is the robot grasping the {top}?", weight: 0.5}
+    - {text: "Has the robot lifted the {top} off the surface?", weight: 0.5}
+  threshold: 0.9
+phase1:
+  - {text: "Is the {top} on top of the {bottom}?", weight: 0.6}
+  - {text: "Is the robot grasping the {top}?", weight: 0.4}
