@@ -200,16 +200,26 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
     n_exec = cfg["actions_per_cycle"]
     phase, log = 0, []
     traj_frames = [np.asarray(frame, dtype=np.uint8)] if detail_dir else None
+    ep_dir = None
+    if detail_dir is not None:
+        ep_dir = os.path.join(detail_dir, f"s{seed}")
+        os.makedirs(ep_dir, exist_ok=True)
     for cycle in range(cfg["max_cycles"]):
         # Phase transition: model-judged on the current committed frame
         # (question/threshold from the spec when one is loaded, else the
         # StackBlocksGoal defaults).
+        trans_info = None
         if phase == 0 and (spec is not None or args.scorer == "phase"):
             tq = spec["transition"] if spec else questions["grasp"]
             th = spec["threshold"] if spec else PHASE_THRESHOLD
             tframe = judge_view.render() if judge_view else frame
             p_t, _ = judge.p_yes([tframe], [tq])
-            if float(p_t[0]) > th:
+            fired = float(p_t[0]) > th
+            trans_info = dict(question=tq, p=round(float(p_t[0]), 4),
+                              threshold=th, fired=fired)
+            if ep_dir is not None:
+                save_png(tframe, os.path.join(ep_dir, f"c{cycle:02d}_transition.png"))
+            if fired:
                 phase = 1
 
         torch.manual_seed(hash((seed, cycle)) % 2**31)
@@ -261,9 +271,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 np.asarray(frame, dtype=np.uint8),
                 end_frames, int(cfg.get("batch", 8)), spec=spec)
             pick = int(np.argmax(scores))
-            if detail_dir is not None:
-                d = os.path.join(detail_dir, f"s{seed}")
-                os.makedirs(d, exist_ok=True)
+            if ep_dir is not None:
+                d = ep_dir
                 save_png(frame, os.path.join(d, f"c{cycle:02d}_committed.png"))
                 for ci_, f_ in enumerate(end_frames):
                     save_png(f_, os.path.join(d, f"c{cycle:02d}_cand{ci_}.png"))
@@ -281,15 +290,15 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 break
         entry = dict(cycle=cycle, phase=phase, pick=pick,
                      scores=[round(float(s), 4) for s in scores])
+        if trans_info is not None:
+            entry["transition"] = trans_info
         if args.k > 1 and spec is not None:
             entry["breakdown"] = breakdown
         log.append(entry)
         if done:
             break
     if traj_frames is not None and len(traj_frames) > 1:
-        d = os.path.join(detail_dir, f"s{seed}")
-        os.makedirs(d, exist_ok=True)
-        save_mp4(traj_frames, os.path.join(d, "trajectory.mp4"))
+        save_mp4(traj_frames, os.path.join(ep_dir, "trajectory.mp4"))
     if done:
         return True, cycle, log
     return False, cfg["max_cycles"], log
