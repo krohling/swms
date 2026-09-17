@@ -1,0 +1,13 @@
+# Planning scoring, transition detector swapped to the best single-frame
+# question from the offline screen (holding_above: AUC 0.713, the top
+# performer). Threshold = its F1-optimal operating point (0.96, transparent
+# Qwen screen). Only the transition question changes vs planning.yaml.
+name: planning_holding_above
+phase0:
+  - {text: "Is the robot grasping the {top}?", weight: 1.0}
+transition:
+  text: "Is the gripper holding the {top} above the surface?"
+  threshold: 0.96
+phase1:
+  - {text: "Is the {top} on top of the {bottom}?", weight: 0.6}
+  - {text: "Is the robot grasping the {top}?", weight: 0.4}
