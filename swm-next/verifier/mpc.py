@@ -138,6 +138,34 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
             + 0.4 * ask(end_frames, questions["grasp"])), {}
 
 
+class JudgeView:
+    """Re-render the env's CURRENT pose at a different arm alpha for the
+    judge, leaving the env/policy rendering untouched. Same model/data,
+    materials flipped around a second mujoco.Renderer pass."""
+
+    def __init__(self, env, alpha):
+        import mujoco
+        self.mujoco = mujoco
+        self.u = env.env.unwrapped
+        self.alpha = float(alpha)
+        m = self.u._model
+        self.mat_ids = [i for i in (self.mujoco.mj_name2id(
+            m, self.mujoco.mjtObj.mjOBJ_MATERIAL, n)
+            for n in ARM_MATERIALS + (PAD_MATERIAL,)) if i >= 0]
+        self.renderer = self.mujoco.Renderer(m, height=224, width=224)
+
+    def render(self):
+        m = self.u._model
+        saved = [(i, float(m.mat_rgba[i, 3])) for i in self.mat_ids]
+        for i in self.mat_ids:
+            m.mat_rgba[i, 3] = self.alpha
+        self.renderer.update_scene(self.u._data, camera="front_pixels")
+        out = np.asarray(self.renderer.render(), dtype=np.uint8)
+        for i, a in saved:
+            m.mat_rgba[i, 3] = a
+        return out
+
+
 def save_png(arr, path):
     """PNG (lossless): grasp-boundary frames shift the judge's p(yes) by
     0.2+ under JPEG recompression, so saved frames must be bit-identical
@@ -160,7 +188,7 @@ def save_mp4(frames, path, fps=10):
 
 
 def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
-                detail_dir=None):
+                detail_dir=None, judge_view=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
 
@@ -179,7 +207,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
         if phase == 0 and (spec is not None or args.scorer == "phase"):
             tq = spec["transition"] if spec else questions["grasp"]
             th = spec["threshold"] if spec else PHASE_THRESHOLD
-            p_t, _ = judge.p_yes([frame], [tq])
+            tframe = judge_view.render() if judge_view else frame
+            p_t, _ = judge.p_yes([tframe], [tq])
             if float(p_t[0]) > th:
                 phase = 1
 
@@ -222,7 +251,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                     with policy._lock:
                         policy.obs_deque.clear()
                         policy.obs_deque.extend(buf)
-                end_frames.append(np.asarray(f, dtype=np.uint8))
+                end_frames.append(judge_view.render() if judge_view
+                                  else np.asarray(f, dtype=np.uint8))
                 if cand_frames is not None:
                     all_cand_frames.append(cand_frames)
             env.set_state(saved)
@@ -269,6 +299,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
     ap.add_argument("--k", type=int, default=8)
+    ap.add_argument("--judge-alpha", type=float, default=None,
+                    help="re-render frames for the JUDGE at this arm alpha "
+                         "(policy/env keep cfg arm_alpha; e.g. 1.0 = judge "
+                         "sees an opaque arm)")
     ap.add_argument("--save-frames", action="store_true",
                     help="persist committed + candidate end frames per "
                          "selection point (JPEG, ~100MB per n=50 run)")
@@ -298,9 +332,13 @@ def main():
     goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
                             {"block_combo": cfg["block_combo"]})
     questions = build_questions(cfg)
+    judge_view = JudgeView(env, args.judge_alpha) \
+        if args.judge_alpha is not None else None
 
     os.makedirs(args.out, exist_ok=True)
     tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
+    if args.judge_alpha is not None:
+        tag += f"_ja{args.judge_alpha:g}"
     detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}_L{args.lookahead}") \
         if args.save_frames else None
     results, wins = [], 0
@@ -308,14 +346,15 @@ def main():
         seed = cfg["seed_start"] + i
         success, cycles, log = run_episode(env, goal, judge, cfg, args,
                                            questions, seed, spec=spec,
-                                           detail_dir=detail_dir)
+                                           detail_dir=detail_dir,
+                                           judge_view=judge_view)
         wins += success
         results.append(dict(seed=seed, success=success, cycles=cycles, log=log))
         print(f"[{i+1}/{args.seeds}] seed {seed}: "
               f"{'success' if success else 'fail'} @ cycle {cycles} "
               f"(running SR {wins/(i+1):.0%})", flush=True)
 
-    out = dict(k=args.k, scorer=args.scorer,
+    out = dict(k=args.k, scorer=args.scorer, judge_alpha=args.judge_alpha,
                spec=(dict(spec) if spec else None), lookahead=args.lookahead,
                n=args.seeds, sr=wins / args.seeds, episodes=results)
     path = os.path.join(args.out,
