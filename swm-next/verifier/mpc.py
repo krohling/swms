@@ -70,6 +70,42 @@ def make_env(cfg):
     return OGBenchEnv(env)
 
 PHASE_THRESHOLD = 0.9
+PAD_GEOMS = ("ur5e/robotiq/right_pad1", "ur5e/robotiq/right_pad2",
+             "ur5e/robotiq/left_pad1", "ur5e/robotiq/left_pad2")
+BLOCK_NUM = {"red_cube": 0, "blue_cube": 1, "yellow_cube": 2, "green_cube": 3}
+LIFT_EPS = 0.02   # meters above the cube's reset height
+
+
+class OracleProbe:
+    """Ground-truth grasp/lift state from the simulator (never the judge):
+    gripper_contact = pads touching the top cube; lifted = cube center more
+    than LIFT_EPS above its reset height."""
+
+    def __init__(self, env, cfg):
+        import mujoco
+        u = env.env.unwrapped
+        self.u = u
+        self.num = BLOCK_NUM[cfg["block_combo"][0]]
+        self.geom = u._cube_geom_ids_list[self.num][0]
+        self.pads = [mujoco.mj_name2id(u._model, mujoco.mjtObj.mjOBJ_GEOM, g)
+                     for g in PAD_GEOMS]
+        self.z0 = None
+
+    def reset(self):
+        self.z0 = float(self.u.get_block_and_eef_poses()[f"block_{self.num}_pos"][2])
+
+    def read(self):
+        d = self.u._data
+        contact = False
+        for i in range(d.ncon):
+            g = d.contact[i].geom
+            if self.geom in g and any(p in g for p in self.pads):
+                contact = True
+                break
+        z = float(self.u.get_block_and_eef_poses()[f"block_{self.num}_pos"][2])
+        return dict(gripper_contact=bool(contact),
+                    lifted=bool(z > self.z0 + LIFT_EPS),
+                    dz=round(z - self.z0, 4))
 
 
 def build_questions(cfg):
@@ -195,12 +231,14 @@ def save_mp4(frames, path, fps=10):
 
 
 def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
-                detail_dir=None, judge_view=None):
+                detail_dir=None, judge_view=None, probe=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
 
     frame = goal.reset_env(seed=seed)
     goal.reset_hook()
+    if probe is not None:
+        probe.reset()
     policy = DiffusionPolicy.load(cfg["diffusion_path"], device=cfg["device"])
     policy.add_obs(frame)
 
@@ -302,6 +340,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 break
         entry = dict(cycle=cycle, phase=phase, pick=pick,
                      scores=[round(float(s), 4) for s in scores])
+        if probe is not None:
+            entry["oracle"] = probe.read()
         if trans_info is not None:
             entry["transition"] = trans_info
         if args.k > 1 and spec is not None:
@@ -355,6 +395,7 @@ def main():
     questions = build_questions(cfg)
     judge_view = JudgeView(env, args.judge_alpha) \
         if args.judge_alpha is not None else None
+    probe = OracleProbe(env, cfg)
 
     os.makedirs(args.out, exist_ok=True)
     tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
@@ -368,7 +409,7 @@ def main():
         success, cycles, log = run_episode(env, goal, judge, cfg, args,
                                            questions, seed, spec=spec,
                                            detail_dir=detail_dir,
-                                           judge_view=judge_view)
+                                           judge_view=judge_view, probe=probe)
         wins += success
         results.append(dict(seed=seed, success=success, cycles=cycles, log=log))
         print(f"[{i+1}/{args.seeds}] seed {seed}: "
