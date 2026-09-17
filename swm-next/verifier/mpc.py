@@ -90,7 +90,26 @@ def build_questions(cfg):
     )
 
 
-def score_candidates(judge, scorer, phase, questions, current, end_frames, batch):
+def load_spec(path, cfg):
+    """Phase-scorer spec: weighted question sets per phase plus the
+    transition question/threshold. Placeholders {top}/{bottom} fill from
+    the config's block_combo. Replicating planning's objective exactly is
+    specs/planning.yaml; iterate on questions by writing a new spec."""
+    top, bottom = [b.replace("_", " ") for b in cfg["block_combo"]]
+    fill = lambda s: s.replace("{top}", top).replace("{bottom}", bottom)
+    raw = yaml.safe_load(open(path))
+    spec = dict(
+        name=raw["name"],
+        phase0=[(fill(q["text"]), float(q["weight"])) for q in raw["phase0"]],
+        phase1=[(fill(q["text"]), float(q["weight"])) for q in raw["phase1"]],
+        transition=fill(raw["transition"]["text"]),
+        threshold=float(raw["transition"].get("threshold", 0.9)),
+    )
+    return spec
+
+
+def score_candidates(judge, scorer, phase, questions, current, end_frames,
+                     batch, spec=None):
     """One score per candidate chunk."""
     def ask(images, q):
         out = np.zeros(len(images))
@@ -99,6 +118,11 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames, batch
             out[i:i + len(images[i:i + batch])] = p
         return out
 
+    if spec is not None:
+        total = np.zeros(len(end_frames))
+        for q, w in (spec["phase0"] if phase == 0 else spec["phase1"]):
+            total += w * ask(end_frames, q)
+        return total
     if scorer == "progress":
         pairs = [(current, f) for f in end_frames]
         return ask(pairs, questions["progress"])
@@ -111,7 +135,7 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames, batch
             + 0.4 * ask(end_frames, questions["grasp"]))
 
 
-def run_episode(env, goal, judge, cfg, args, questions, seed):
+def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
 
@@ -123,11 +147,14 @@ def run_episode(env, goal, judge, cfg, args, questions, seed):
     n_exec = cfg["actions_per_cycle"]
     phase, log = 0, []
     for cycle in range(cfg["max_cycles"]):
-        # Phase transition, exactly like StackBlocksGoal.get_questions:
-        # model-judged p(grasp) on the current committed frame.
-        if phase == 0 and args.scorer == "phase":
-            p_grasp, _ = judge.p_yes([frame], [questions["grasp"]])
-            if float(p_grasp[0]) > PHASE_THRESHOLD:
+        # Phase transition: model-judged on the current committed frame
+        # (question/threshold from the spec when one is loaded, else the
+        # StackBlocksGoal defaults).
+        if phase == 0 and (spec is not None or args.scorer == "phase"):
+            tq = spec["transition"] if spec else questions["grasp"]
+            th = spec["threshold"] if spec else PHASE_THRESHOLD
+            p_t, _ = judge.p_yes([frame], [tq])
+            if float(p_t[0]) > th:
                 phase = 1
 
         torch.manual_seed(hash((seed, cycle)) % 2**31)
@@ -166,7 +193,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed):
             env.set_state(saved)
             scores = score_candidates(judge, args.scorer, phase, questions,
                                       np.asarray(frame, dtype=np.uint8),
-                                      end_frames, int(cfg.get("batch", 8)))
+                                      end_frames, int(cfg.get("batch", 8)),
+                                      spec=spec)
             pick = int(np.argmax(scores))
 
         done = False
@@ -187,6 +215,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
     ap.add_argument("--k", type=int, default=8)
+    ap.add_argument("--spec", default=None,
+                    help="path to a phase-scorer spec yaml (weighted question "
+                         "sets per phase + transition); overrides --scorer")
     ap.add_argument("--scorer", default="phase",
                     help="phase | progress | q:<name> for a single fixed "
                          "question (e.g. q:above_cube), no phase machinery")
@@ -203,7 +234,8 @@ def main():
     sys.dont_write_bytecode = True
     from label_teacher import QwenJudge
     judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"]) \
-        if args.k > 1 or args.scorer == "phase" else None
+        if args.k > 1 or args.scorer == "phase" or args.spec else None
+    spec = load_spec(args.spec, cfg) if args.spec else None
 
     env = make_env(cfg)
     goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
@@ -215,16 +247,17 @@ def main():
     for i in range(args.seeds):
         seed = cfg["seed_start"] + i
         success, cycles, log = run_episode(env, goal, judge, cfg, args,
-                                           questions, seed)
+                                           questions, seed, spec=spec)
         wins += success
         results.append(dict(seed=seed, success=success, cycles=cycles, log=log))
         print(f"[{i+1}/{args.seeds}] seed {seed}: "
               f"{'success' if success else 'fail'} @ cycle {cycles} "
               f"(running SR {wins/(i+1):.0%})", flush=True)
 
-    out = dict(k=args.k, scorer=args.scorer, lookahead=args.lookahead,
+    out = dict(k=args.k, scorer=args.scorer,
+               spec=(dict(spec) if spec else None), lookahead=args.lookahead,
                n=args.seeds, sr=wins / args.seeds, episodes=results)
-    tag = args.scorer.replace(":", "_")
+    tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
     path = os.path.join(args.out,
                         f"mpc_{tag}_k{args.k}_L{args.lookahead}.json")
     json.dump(out, open(path, "w"), indent=1)

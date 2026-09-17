@@ -1,0 +1,13 @@
+# Shaped ladder: graded approach questions in phase 0, goal-relative in
+# phase 1; transition unchanged from planning.
+name: shaped_ladder
+phase0:
+  - {text: "Is the gripper directly above the {top}?", weight: 0.5}
+  - {text: "Is the gripper touching the {top}?", weight: 0.5}
+transition:
+  text: "Is the robot grasping the {top}?"
+  threshold: 0.9
+phase1:
+  - {text: "Is the {top} directly above the {bottom}?", weight: 0.3}
+  - {text: "Is the {top} on top of the {bottom}?", weight: 0.4}
+  - {text: "Is the robot grasping the {top}?", weight: 0.3}
