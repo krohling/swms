@@ -143,6 +143,19 @@ def save_jpg(arr, path):
     Image.fromarray(np.asarray(arr, dtype=np.uint8)).save(path, quality=82)
 
 
+def save_mp4(frames, path, fps=10):
+    """Encode a list of HWC uint8 frames via ffmpeg (rawvideo stdin)."""
+    import subprocess
+    arr = np.stack([np.asarray(f, dtype=np.uint8) for f in frames])
+    h, w = arr.shape[1:3]
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo",
+         "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28",
+         "-movflags", "+faststart", path],
+        input=arr.tobytes(), check=True)
+
+
 def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 detail_dir=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
@@ -155,6 +168,7 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
 
     n_exec = cfg["actions_per_cycle"]
     phase, log = 0, []
+    traj_frames = [np.asarray(frame, dtype=np.uint8)] if detail_dir else None
     for cycle in range(cfg["max_cycles"]):
         # Phase transition: model-judged on the current committed frame
         # (question/threshold from the spec when one is loaded, else the
@@ -174,9 +188,12 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
         else:
             saved = env.get_state()
             end_frames = []
+            all_cand_frames = []
             for ci, c in enumerate(candidates):
                 env.set_state(saved)
                 f = frame
+                cand_frames = [np.asarray(frame, dtype=np.uint8)] \
+                    if detail_dir is not None else None
                 deep = args.lookahead > len(c)
                 if deep:
                     from collections import deque
@@ -184,6 +201,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                         buf = deque(policy.obs_deque, maxlen=policy.obs_deque.maxlen)
                 for a in c:
                     f = env.step(np.asarray(a))
+                    if cand_frames is not None:
+                        cand_frames.append(np.asarray(f, dtype=np.uint8))
                     if deep:
                         policy.add_obs(f)
                 done_steps = len(c)
@@ -192,6 +211,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                     chunk = policy.get_action()
                     for a in chunk[: args.lookahead - done_steps]:
                         f = env.step(np.asarray(a))
+                        if cand_frames is not None:
+                            cand_frames.append(np.asarray(f, dtype=np.uint8))
                         policy.add_obs(f)
                     done_steps += min(len(chunk), args.lookahead - done_steps)
                 if deep:
@@ -199,6 +220,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                         policy.obs_deque.clear()
                         policy.obs_deque.extend(buf)
                 end_frames.append(np.asarray(f, dtype=np.uint8))
+                if cand_frames is not None:
+                    all_cand_frames.append(cand_frames)
             env.set_state(saved)
             scores, breakdown = score_candidates(
                 judge, args.scorer, phase, questions,
@@ -211,10 +234,14 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 save_jpg(frame, os.path.join(d, f"c{cycle:02d}_committed.jpg"))
                 for ci_, f_ in enumerate(end_frames):
                     save_jpg(f_, os.path.join(d, f"c{cycle:02d}_cand{ci_}.jpg"))
+                for ci_, cf in enumerate(all_cand_frames):
+                    save_mp4(cf, os.path.join(d, f"c{cycle:02d}_cand{ci_}.mp4"))
 
         done = False
         for a in candidates[pick][:n_exec]:
             frame = env.step(np.asarray(a))
+            if traj_frames is not None:
+                traj_frames.append(np.asarray(frame, dtype=np.uint8))
             policy.add_obs(frame)
             if goal.get_done():
                 done = True
@@ -225,7 +252,13 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
             entry["breakdown"] = breakdown
         log.append(entry)
         if done:
-            return True, cycle, log
+            break
+    if traj_frames is not None and len(traj_frames) > 1:
+        d = os.path.join(detail_dir, f"s{seed}")
+        os.makedirs(d, exist_ok=True)
+        save_mp4(traj_frames, os.path.join(d, "trajectory.mp4"))
+    if done:
+        return True, cycle, log
     return False, cfg["max_cycles"], log
 
 
