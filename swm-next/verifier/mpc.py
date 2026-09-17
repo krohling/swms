@@ -120,22 +120,31 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
 
     if spec is not None:
         total = np.zeros(len(end_frames))
+        breakdown = {}
         for q, w in (spec["phase0"] if phase == 0 else spec["phase1"]):
-            total += w * ask(end_frames, q)
-        return total
+            p = ask(end_frames, q)
+            breakdown[q] = [round(float(v), 4) for v in p]
+            total += w * p
+        return total, breakdown
     if scorer == "progress":
         pairs = [(current, f) for f in end_frames]
-        return ask(pairs, questions["progress"])
+        return ask(pairs, questions["progress"]), {}
     if scorer.startswith("q:"):
         # single fixed question, no phase machinery
-        return ask(end_frames, questions[scorer[2:]])
+        return ask(end_frames, questions[scorer[2:]]), {}
     if phase == 0:
-        return ask(end_frames, questions["grasp"])
+        return ask(end_frames, questions["grasp"]), {}
     return (0.6 * ask(end_frames, questions["ontop"])
-            + 0.4 * ask(end_frames, questions["grasp"]))
+            + 0.4 * ask(end_frames, questions["grasp"])), {}
 
 
-def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None):
+def save_jpg(arr, path):
+    from PIL import Image
+    Image.fromarray(np.asarray(arr, dtype=np.uint8)).save(path, quality=82)
+
+
+def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
+                detail_dir=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
 
@@ -191,11 +200,17 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None):
                         policy.obs_deque.extend(buf)
                 end_frames.append(np.asarray(f, dtype=np.uint8))
             env.set_state(saved)
-            scores = score_candidates(judge, args.scorer, phase, questions,
-                                      np.asarray(frame, dtype=np.uint8),
-                                      end_frames, int(cfg.get("batch", 8)),
-                                      spec=spec)
+            scores, breakdown = score_candidates(
+                judge, args.scorer, phase, questions,
+                np.asarray(frame, dtype=np.uint8),
+                end_frames, int(cfg.get("batch", 8)), spec=spec)
             pick = int(np.argmax(scores))
+            if detail_dir is not None:
+                d = os.path.join(detail_dir, f"s{seed}")
+                os.makedirs(d, exist_ok=True)
+                save_jpg(frame, os.path.join(d, f"c{cycle:02d}_committed.jpg"))
+                for ci_, f_ in enumerate(end_frames):
+                    save_jpg(f_, os.path.join(d, f"c{cycle:02d}_cand{ci_}.jpg"))
 
         done = False
         for a in candidates[pick][:n_exec]:
@@ -204,8 +219,11 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None):
             if goal.get_done():
                 done = True
                 break
-        log.append(dict(cycle=cycle, phase=phase, pick=pick,
-                        scores=[round(float(s), 4) for s in scores]))
+        entry = dict(cycle=cycle, phase=phase, pick=pick,
+                     scores=[round(float(s), 4) for s in scores])
+        if args.k > 1 and spec is not None:
+            entry["breakdown"] = breakdown
+        log.append(entry)
         if done:
             return True, cycle, log
     return False, cfg["max_cycles"], log
@@ -215,6 +233,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
     ap.add_argument("--k", type=int, default=8)
+    ap.add_argument("--save-frames", action="store_true",
+                    help="persist committed + candidate end frames per "
+                         "selection point (JPEG, ~100MB per n=50 run)")
     ap.add_argument("--spec", default=None,
                     help="path to a phase-scorer spec yaml (weighted question "
                          "sets per phase + transition); overrides --scorer")
@@ -243,11 +264,15 @@ def main():
     questions = build_questions(cfg)
 
     os.makedirs(args.out, exist_ok=True)
+    tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
+    detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}_L{args.lookahead}") \
+        if args.save_frames else None
     results, wins = [], 0
     for i in range(args.seeds):
         seed = cfg["seed_start"] + i
         success, cycles, log = run_episode(env, goal, judge, cfg, args,
-                                           questions, seed, spec=spec)
+                                           questions, seed, spec=spec,
+                                           detail_dir=detail_dir)
         wins += success
         results.append(dict(seed=seed, success=success, cycles=cycles, log=log))
         print(f"[{i+1}/{args.seeds}] seed {seed}: "
@@ -257,7 +282,6 @@ def main():
     out = dict(k=args.k, scorer=args.scorer,
                spec=(dict(spec) if spec else None), lookahead=args.lookahead,
                n=args.seeds, sr=wins / args.seeds, episodes=results)
-    tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
     path = os.path.join(args.out,
                         f"mpc_{tag}_k{args.k}_L{args.lookahead}.json")
     json.dump(out, open(path, "w"), indent=1)
