@@ -231,7 +231,7 @@ def save_mp4(frames, path, fps=10):
 
 
 def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
-                detail_dir=None, judge_view=None, probe=None):
+                detail_dir=None, judge_view=None, probe=None, temps=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
 
@@ -273,7 +273,7 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 phase = 1
 
         torch.manual_seed(hash((seed, cycle)) % 2**31)
-        candidates = np.asarray(policy.sample_trajs(args.k))
+        candidates = np.asarray(policy.sample_trajs(args.k, temperatures=temps))
 
         if args.k == 1:
             pick, scores = 0, [0.0]
@@ -281,6 +281,7 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
             saved = env.get_state()
             end_frames = []
             all_cand_frames = []
+            cand_oracle = []
             for ci, c in enumerate(candidates):
                 env.set_state(saved)
                 f = frame
@@ -313,6 +314,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                         policy.obs_deque.extend(buf)
                 end_frames.append(judge_view.render() if judge_view
                                   else np.asarray(f, dtype=np.uint8))
+                if probe is not None:
+                    cand_oracle.append(probe.read())   # candidate's end state
                 if cand_frames is not None:
                     all_cand_frames.append(cand_frames)
             env.set_state(saved)
@@ -340,6 +343,10 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 break
         entry = dict(cycle=cycle, phase=phase, pick=pick,
                      scores=[round(float(s), 4) for s in scores])
+        if temps is not None:
+            entry["temps"] = temps
+        if args.k > 1 and probe is not None and cand_oracle:
+            entry["cand_oracle"] = cand_oracle
         if probe is not None:
             entry["oracle"] = probe.read()
         if trans_info is not None:
@@ -360,6 +367,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
     ap.add_argument("--k", type=int, default=8)
+    ap.add_argument("--temps", default=None,
+                    help="comma-separated per-candidate initial-noise "
+                         "temperatures (diversity ladder); length overrides "
+                         "--k. e.g. 0.0,0.66,1.33,2.0")
     ap.add_argument("--judge-alpha", type=float, default=None,
                     help="re-render frames for the JUDGE at this arm alpha "
                          "(policy/env keep cfg arm_alpha; e.g. 1.0 = judge "
@@ -388,6 +399,9 @@ def main():
     judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"]) \
         if args.k > 1 or args.scorer == "phase" or args.spec else None
     spec = load_spec(args.spec, cfg) if args.spec else None
+    temps = [float(x) for x in args.temps.split(",")] if args.temps else None
+    if temps is not None:
+        args.k = len(temps)
 
     env = make_env(cfg)
     goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
@@ -401,6 +415,8 @@ def main():
     tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
     if args.judge_alpha is not None:
         tag += f"_ja{args.judge_alpha:g}"
+    if temps is not None:
+        tag += "_templadder"
     detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}_L{args.lookahead}") \
         if args.save_frames else None
     results, wins = [], 0
@@ -409,7 +425,8 @@ def main():
         success, cycles, log = run_episode(env, goal, judge, cfg, args,
                                            questions, seed, spec=spec,
                                            detail_dir=detail_dir,
-                                           judge_view=judge_view, probe=probe)
+                                           judge_view=judge_view, probe=probe,
+                                           temps=temps)
         wins += success
         results.append(dict(seed=seed, success=success, cycles=cycles, log=log))
         print(f"[{i+1}/{args.seeds}] seed {seed}: "
@@ -417,6 +434,7 @@ def main():
               f"(running SR {wins/(i+1):.0%})", flush=True)
 
     out = dict(k=args.k, scorer=args.scorer, judge_alpha=args.judge_alpha,
+               temps=temps,
                spec=(dict(spec) if spec else None), lookahead=args.lookahead,
                n=args.seeds, sr=wins / args.seeds, episodes=results)
     path = os.path.join(args.out,

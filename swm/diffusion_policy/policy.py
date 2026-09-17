@@ -55,7 +55,7 @@ class DiffusionPolicy(object):
 
     
     @torch.no_grad()
-    def sample_trajs(self, num_trajs):
+    def sample_trajs(self, num_trajs, temperatures=None):
         if self.config.with_image:
             nimages = torch.stack([x['embed'] for x in self.obs_deque])
         if self.config.with_state:
@@ -76,7 +76,16 @@ class DiffusionPolicy(object):
         # now we sample actions
         noisy_action = torch.randn(
             (num_trajs, self.config.pred_horizon, self.config.action_dim), device=self.device)
-        
+        # Optional per-sample initial-noise temperature (verifier-MPC diversity
+        # ladder). temperatures=None is a no-op (unchanged behavior); a length-
+        # num_trajs vector scales each sample's starting noise. Note: only the
+        # initial noise is scaled, not the per-step DDPM variance, so tau=0 is
+        # the lowest-variance sample, not fully deterministic.
+        if temperatures is not None:
+            tau = torch.as_tensor(temperatures, dtype=torch.float32,
+                                  device=self.device).view(-1, 1, 1)
+            noisy_action = noisy_action * tau
+
         self.noise_scheduler.set_timesteps(
             self.config.num_eval_diffusion_iters)
         
