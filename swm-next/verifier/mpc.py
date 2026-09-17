@@ -138,9 +138,12 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
             + 0.4 * ask(end_frames, questions["grasp"])), {}
 
 
-def save_jpg(arr, path):
+def save_png(arr, path):
+    """PNG (lossless): grasp-boundary frames shift the judge's p(yes) by
+    0.2+ under JPEG recompression, so saved frames must be bit-identical
+    to what was scored."""
     from PIL import Image
-    Image.fromarray(np.asarray(arr, dtype=np.uint8)).save(path, quality=82)
+    Image.fromarray(np.asarray(arr, dtype=np.uint8)).save(path)
 
 
 def save_mp4(frames, path, fps=10):
@@ -231,9 +234,9 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
             if detail_dir is not None:
                 d = os.path.join(detail_dir, f"s{seed}")
                 os.makedirs(d, exist_ok=True)
-                save_jpg(frame, os.path.join(d, f"c{cycle:02d}_committed.jpg"))
+                save_png(frame, os.path.join(d, f"c{cycle:02d}_committed.png"))
                 for ci_, f_ in enumerate(end_frames):
-                    save_jpg(f_, os.path.join(d, f"c{cycle:02d}_cand{ci_}.jpg"))
+                    save_png(f_, os.path.join(d, f"c{cycle:02d}_cand{ci_}.png"))
                 for ci_, cf in enumerate(all_cand_frames):
                     save_mp4(cf, os.path.join(d, f"c{cycle:02d}_cand{ci_}.mp4"))
 
