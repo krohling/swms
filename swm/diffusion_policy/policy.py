@@ -55,7 +55,7 @@ class DiffusionPolicy(object):
 
     
     @torch.no_grad()
-    def sample_trajs(self, num_trajs):
+    def sample_trajs(self, num_trajs, temperatures=None):
         if self.config.with_image:
             nimages = torch.stack([x['embed'] for x in self.obs_deque])
         if self.config.with_state:
@@ -76,25 +76,53 @@ class DiffusionPolicy(object):
         # now we sample actions
         noisy_action = torch.randn(
             (num_trajs, self.config.pred_horizon, self.config.action_dim), device=self.device)
-        
+        # Optional per-sample initial-noise temperature (verifier-MPC diversity
+        # ladder). temperatures=None is a no-op (unchanged behavior); a length-
+        # num_trajs vector scales each sample's starting noise. Note: only the
+        # initial noise is scaled, not the per-step DDPM variance, so tau=0 is
+        # per-sample temperature scales BOTH the initial noise (here) and the
+        # per-step DDPM variance (via the scoped randn_tensor patch below), so
+        # tau genuinely controls total sample dispersion. tau=1 everywhere is
+        # bit-identical to the unpatched sampler.
+        tau = None
+        if temperatures is not None:
+            tau = torch.as_tensor(temperatures, dtype=torch.float32,
+                                  device=self.device).view(-1, 1, 1)
+            noisy_action = noisy_action * tau
+
         self.noise_scheduler.set_timesteps(
             self.config.num_eval_diffusion_iters)
-        
-        naction = noisy_action
-        for t in self.noise_scheduler.timesteps:
-            # predict noise
-            noise_pred = self.nets['noise_pred_net'](
-                sample=naction,
-                timestep=t,
-                global_cond=obs_cond
-            )
 
-            # inverse diffusion step (remove noise)
-            naction = self.noise_scheduler.step(
-                model_output=noise_pred,
-                timestep=t,
-                sample=naction
-            ).prev_sample
+        import contextlib
+        from diffusers.schedulers import scheduling_ddpm as _sd
+
+        @contextlib.contextmanager
+        def _scaled_variance():
+            if tau is None:
+                yield; return
+            orig = _sd.randn_tensor
+            _sd.randn_tensor = lambda *a, **k: orig(*a, **k) * tau
+            try:
+                yield
+            finally:
+                _sd.randn_tensor = orig
+
+        naction = noisy_action
+        with _scaled_variance():
+            for t in self.noise_scheduler.timesteps:
+                # predict noise
+                noise_pred = self.nets['noise_pred_net'](
+                    sample=naction,
+                    timestep=t,
+                    global_cond=obs_cond
+                )
+
+                # inverse diffusion step (remove noise)
+                naction = self.noise_scheduler.step(
+                    model_output=noise_pred,
+                    timestep=t,
+                    sample=naction
+                ).prev_sample
         action_pred: torch.Tensor = unnormalize_data(
             naction, stats=self.stats['action'])
         return action_pred.cpu().numpy()

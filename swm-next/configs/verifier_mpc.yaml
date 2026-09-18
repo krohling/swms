@@ -1,0 +1,11 @@
+# Verifier-guided MPC (swm-next/verifier/mpc.py): Qwen as the closed-loop
+# value function, sim as perfect world model. Local run (macOS/MPS).
+device: mps
+seed_start: 6000
+block_combo: [blue_cube, green_cube]
+diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+max_cycles: 50                 # matches eval protocol num_steps
+actions_per_cycle: 4           # matches eval protocol num_actions_executed
+arm_alpha: 0.1                 # OGBench default rendering
+model_id: Qwen/Qwen3-VL-8B-Instruct
+batch: 8                       # judge forward-pass batch size
