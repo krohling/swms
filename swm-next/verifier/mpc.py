@@ -86,6 +86,7 @@ class OracleProbe:
         u = env.env.unwrapped
         self.u = u
         self.num = BLOCK_NUM[cfg["block_combo"][0]]
+        self.bottom_num = BLOCK_NUM[cfg["block_combo"][1]]
         self.geom = u._cube_geom_ids_list[self.num][0]
         self.pads = [mujoco.mj_name2id(u._model, mujoco.mjtObj.mjOBJ_GEOM, g)
                      for g in PAD_GEOMS]
@@ -102,10 +103,17 @@ class OracleProbe:
             if self.geom in g and any(p in g for p in self.pads):
                 contact = True
                 break
-        z = float(self.u.get_block_and_eef_poses()[f"block_{self.num}_pos"][2])
+        poses = self.u.get_block_and_eef_poses()
+        eef = poses["eef_pos"]
+        top = poses[f"block_{self.num}_pos"]
+        bottom = poses[f"block_{self.bottom_num}_pos"]
+        z = float(top[2])
         return dict(gripper_contact=bool(contact),
                     lifted=bool(z > self.z0 + LIFT_EPS),
-                    dz=round(z - self.z0, 4))
+                    dz=round(z - self.z0, 4),
+                    eef=[round(float(x), 4) for x in eef[:3]],
+                    top=[round(float(x), 4) for x in top[:3]],
+                    bottom=[round(float(x), 4) for x in bottom[:3]])
 
 
 def build_questions(cfg):
@@ -319,10 +327,25 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 if cand_frames is not None:
                     all_cand_frames.append(cand_frames)
             env.set_state(saved)
-            scores, breakdown = score_candidates(
-                judge, args.scorer, phase, questions,
-                np.asarray(frame, dtype=np.uint8),
-                end_frames, int(cfg.get("batch", 8)), spec=spec)
+            if args.scorer == "oracle_dist":
+                # Transparent oracle proxy: before grasp, score each candidate
+                # by -distance(gripper, top cube); after grasp, by
+                # -distance(top cube, bottom cube). Phase from ground-truth
+                # contact on the committed state (non-sticky). No judge.
+                committed = probe.read()
+                grasped = committed["gripper_contact"]
+                def _d(a, b):
+                    return float(np.linalg.norm(np.array(a) - np.array(b)))
+                scores = np.array([
+                    -_d(o["top"], o["bottom"]) if grasped else -_d(o["eef"], o["top"])
+                    for o in cand_oracle])
+                breakdown = {}
+                phase = 1 if grasped else 0
+            else:
+                scores, breakdown = score_candidates(
+                    judge, args.scorer, phase, questions,
+                    np.asarray(frame, dtype=np.uint8),
+                    end_frames, int(cfg.get("batch", 8)), spec=spec)
             pick = int(np.argmax(scores))
             if ep_dir is not None:
                 d = ep_dir
@@ -395,10 +418,13 @@ def main():
 
     import sys
     sys.dont_write_bytecode = True
-    from label_teacher import QwenJudge
-    judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"]) \
-        if args.k > 1 or args.scorer == "phase" or args.spec else None
-    spec = load_spec(args.spec, cfg) if args.spec else None
+    needs_judge = args.scorer != "oracle_dist" and (
+        args.k > 1 or args.scorer == "phase" or args.spec)
+    judge = None
+    if needs_judge:
+        from label_teacher import QwenJudge
+        judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"])
+    spec = load_spec(args.spec, cfg) if (args.spec and args.scorer != "oracle_dist") else None
     temps = [float(x) for x in args.temps.split(",")] if args.temps else None
     if temps is not None:
         args.k = len(temps)
