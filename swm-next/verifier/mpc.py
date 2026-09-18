@@ -386,6 +386,45 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
     return False, cfg["max_cycles"], log
 
 
+_WCTX = {}
+
+
+def _init_worker(cfg, args):
+    """Build a per-process env/policy stack once. No judge is loaded for
+    oracle_dist (judge=None); VLM scorers would load one per worker, which
+    is why --workers should stay 1 for those."""
+    import sys as _s
+    _s.dont_write_bytecode = True
+    env = make_env(cfg)
+    goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
+                            {"block_combo": cfg["block_combo"]})
+    judge = None
+    if args.scorer != "oracle_dist" and (args.k > 1 or args.scorer == "phase" or args.spec):
+        from label_teacher import QwenJudge
+        judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"])
+    spec = load_spec(args.spec, cfg) if (args.spec and args.scorer != "oracle_dist") else None
+    temps = [float(x) for x in args.temps.split(",")] if args.temps else None
+    jview = JudgeView(env, args.judge_alpha) if args.judge_alpha is not None else None
+    tag = f"spec_{spec['name']}" if spec else args.scorer.replace(":", "_")
+    if args.judge_alpha is not None:
+        tag += f"_ja{args.judge_alpha:g}"
+    if temps is not None:
+        tag += "_templadder"
+    detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}_L{args.lookahead}") \
+        if args.save_frames else None
+    _WCTX.update(env=env, goal=goal, judge=judge, spec=spec, temps=temps,
+                 jview=jview, detail_dir=detail_dir, cfg=cfg, args=args,
+                 questions=build_questions(cfg), probe=OracleProbe(env, cfg))
+
+
+def _worker_seed(seed):
+    w = _WCTX
+    return seed, run_episode(w["env"], w["goal"], w["judge"], w["cfg"], w["args"],
+                             w["questions"], seed, spec=w["spec"],
+                             detail_dir=w["detail_dir"], judge_view=w["jview"],
+                             probe=w["probe"], temps=w["temps"])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
@@ -412,6 +451,10 @@ def main():
                          "16-step candidate chunk the policy continues the "
                          "rollout closed-loop (resampled every 16 steps)")
     ap.add_argument("--seeds", type=int, default=25)
+    ap.add_argument("--workers", type=int, default=1,
+                    help="parallel episode workers (each builds its own env+"
+                         "policy). Big speedup for oracle_dist (no judge); with "
+                         "a VLM scorer every worker loads the judge, so keep 1.")
     ap.add_argument("--out", default="outputs_verifier_mpc")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
@@ -445,19 +488,37 @@ def main():
         tag += "_templadder"
     detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}_L{args.lookahead}") \
         if args.save_frames else None
+    seeds = [cfg["seed_start"] + i for i in range(args.seeds)]
     results, wins = [], 0
-    for i in range(args.seeds):
-        seed = cfg["seed_start"] + i
-        success, cycles, log = run_episode(env, goal, judge, cfg, args,
-                                           questions, seed, spec=spec,
-                                           detail_dir=detail_dir,
-                                           judge_view=judge_view, probe=probe,
-                                           temps=temps)
+
+    def one(seed, _env, _goal, _probe, _jview):
+        # per-seed episode; deterministic in seed, so worker order is irrelevant
+        return seed, run_episode(_env, _goal, judge, cfg, args, questions, seed,
+                                 spec=spec, detail_dir=detail_dir,
+                                 judge_view=_jview, probe=_probe, temps=temps)
+
+    if args.workers <= 1:
+        stream = (one(s, env, goal, probe, judge_view) for s in seeds)
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+        _WCTX["cfg"] = cfg; _WCTX["args"] = args
+        pool = ProcessPoolExecutor(max_workers=args.workers,
+                                   initializer=_init_worker,
+                                   initargs=(cfg, args))
+        stream = pool.map(_worker_seed, seeds)
+
+    done = 0
+    for seed, (success, cycles, log) in sorted(
+            stream, key=lambda x: x[0]) if False else stream:
+        done += 1
         wins += success
         results.append(dict(seed=seed, success=success, cycles=cycles, log=log))
-        print(f"[{i+1}/{args.seeds}] seed {seed}: "
+        print(f"[{done}/{args.seeds}] seed {seed}: "
               f"{'success' if success else 'fail'} @ cycle {cycles} "
-              f"(running SR {wins/(i+1):.0%})", flush=True)
+              f"(running SR {wins/done:.0%})", flush=True)
+    if args.workers > 1:
+        pool.shutdown()
+    results.sort(key=lambda d: d["seed"])
 
     out = dict(k=args.k, scorer=args.scorer, judge_alpha=args.judge_alpha,
                temps=temps,
