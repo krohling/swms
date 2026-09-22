@@ -160,7 +160,7 @@ def load_spec(path, cfg):
 
 
 def score_candidates(judge, scorer, phase, questions, current, end_frames,
-                     batch, spec=None):
+                     batch, spec=None, gate=None):
     """One score per candidate chunk."""
     def ask(images, q):
         out = np.zeros(len(images))
@@ -169,6 +169,20 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
             out[i:i + len(images[i:i + batch])] = p
         return out
 
+    if scorer in ("softgate", "softgate_ema"):
+        # Latch-free soft-gated objective (addresses the one-way phase latch).
+        # gate = "am I holding it now?" = p(grasp) on the committed frame
+        # (raw for `softgate`, EMA-smoothed across cycles for `softgate_ema`,
+        # supplied by run_episode). When holding (gate high) weight placing;
+        # when dropped (gate low) weight re-grasping. Self-corrects after a
+        # drop; the EMA variant ignores single-cycle p(grasp) dips.
+        g = gate if gate is not None else float(ask([current], questions["grasp"])[0])
+        pg = ask(end_frames, questions["grasp"])
+        po = ask(end_frames, questions["ontop"])
+        total = (1.0 - g) * pg + g * (0.6 * po + 0.4 * pg)
+        return total, {"gate": round(float(g), 4),
+                       "grasp": [round(float(v), 4) for v in pg],
+                       "ontop": [round(float(v), 4) for v in po]}
     if spec is not None:
         total = np.zeros(len(end_frames))
         breakdown = {}
@@ -252,6 +266,8 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
 
     n_exec = cfg["actions_per_cycle"]
     phase, log = 0, []
+    gate_ema = None                       # EMA holding-gate state (softgate_ema)
+    GATE_ALPHA = 0.35                     # ~5-cycle window; resists single-dip chatter
     traj_frames = [np.asarray(frame, dtype=np.uint8)] if detail_dir else None
     ep_dir = None
     if detail_dir is not None:
@@ -342,10 +358,22 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 breakdown = {}
                 phase = 1 if grasped else 0
             else:
+                gate_val = None
+                if args.scorer in ("softgate", "softgate_ema"):
+                    gframe = (judge_view.render() if judge_view
+                              else np.asarray(frame, dtype=np.uint8))
+                    rg, _ = judge.p_yes([gframe], [questions["grasp"]])
+                    rg = float(rg[0])
+                    if args.scorer == "softgate_ema":
+                        gate_ema = rg if gate_ema is None \
+                            else GATE_ALPHA * rg + (1 - GATE_ALPHA) * gate_ema
+                        gate_val = gate_ema
+                    else:
+                        gate_val = rg
                 scores, breakdown = score_candidates(
                     judge, args.scorer, phase, questions,
                     np.asarray(frame, dtype=np.uint8),
-                    end_frames, int(cfg.get("batch", 8)), spec=spec)
+                    end_frames, int(cfg.get("batch", 8)), spec=spec, gate=gate_val)
             pick = int(np.argmax(scores))
             if ep_dir is not None:
                 d = ep_dir
