@@ -159,6 +159,23 @@ def load_spec(path, cfg):
     return spec
 
 
+def parse_wq(s):
+    """Parse a weighted-question override: '0.7:Is X?;0.3:Is Y?' ->
+    [('Is X?',0.7),('Is Y?',0.3)]; a bare 'Is X?' -> [('Is X?',1.0)]. None -> None."""
+    if not s:
+        return None
+    out = []
+    for part in s.split(";"):
+        part = part.strip()
+        head = part.split(":", 1)[0]
+        if ":" in part and head.replace(".", "", 1).isdigit():
+            w, q = part.split(":", 1)
+            out.append((q.strip(), float(w)))
+        else:
+            out.append((part, 1.0))
+    return out
+
+
 def score_candidates(judge, scorer, phase, questions, current, end_frames,
                      batch, spec=None, gate=None):
     """One score per candidate chunk."""
@@ -176,13 +193,27 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
         # supplied by run_episode). When holding (gate high) weight placing;
         # when dropped (gate low) weight re-grasping. Self-corrects after a
         # drop; the EMA variant ignores single-cycle p(grasp) dips.
+        # Each slot is a weighted question list (blends supported). Defaults:
+        # approach = grasp, place = ontop, hold(drop-guard) = grasp. The gate
+        # (g) is the hold question on the committed frame, computed in
+        # run_episode; hold is decoupled from approach so overriding the
+        # approach question never weakens the drop-guard / recovery.
+        def wask(wqs):
+            t = np.zeros(len(end_frames))
+            for q, w in wqs:
+                t += w * ask(end_frames, q)
+            return t
         g = gate if gate is not None else float(ask([current], questions["grasp"])[0])
-        pg = ask(end_frames, questions["grasp"])
-        po = ask(end_frames, questions["ontop"])
-        total = (1.0 - g) * pg + g * (0.6 * po + 0.4 * pg)
+        appr = questions.get("_approach") or [(questions["grasp"], 1.0)]
+        place = questions.get("_place") or [(questions["ontop"], 1.0)]
+        hold = questions.get("_hold") or [(questions["grasp"], 1.0)]
+        pg = wask(appr)
+        ph = pg if hold == appr else wask(hold)
+        po = wask(place)
+        total = (1.0 - g) * pg + g * (0.6 * po + 0.4 * ph)
         return total, {"gate": round(float(g), 4),
-                       "grasp": [round(float(v), 4) for v in pg],
-                       "ontop": [round(float(v), 4) for v in po]}
+                       "approach": [round(float(v), 4) for v in pg],
+                       "place": [round(float(v), 4) for v in po]}
     if spec is not None:
         total = np.zeros(len(end_frames))
         breakdown = {}
@@ -267,7 +298,14 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
     n_exec = cfg["actions_per_cycle"]
     phase, log = 0, []
     gate_ema = None                       # EMA holding-gate state (softgate_ema)
-    GATE_ALPHA = 0.35                     # ~5-cycle window; resists single-dip chatter
+    # EMA smoothing constant(s). Symmetric by default (--gate-alpha, 0.35 =
+    # ~5-cycle window, resists single-dip chatter). Asymmetric when
+    # --gate-alpha-fall/-rise are set: a LARGER falling constant tracks a real
+    # drop fast (gate swings toward re-grasping) while a SMALLER rising
+    # constant stays smooth against single-frame false dips (e.g. fall=0.8,
+    # rise=0.35).
+    a_fall = args.gate_alpha_fall if args.gate_alpha_fall is not None else args.gate_alpha
+    a_rise = args.gate_alpha_rise if args.gate_alpha_rise is not None else args.gate_alpha
     traj_frames = [np.asarray(frame, dtype=np.uint8)] if detail_dir else None
     ep_dir = None
     if detail_dir is not None:
@@ -362,11 +400,16 @@ def run_episode(env, goal, judge, cfg, args, questions, seed, spec=None,
                 if args.scorer in ("softgate", "softgate_ema"):
                     gframe = (judge_view.render() if judge_view
                               else np.asarray(frame, dtype=np.uint8))
-                    rg, _ = judge.p_yes([gframe], [questions["grasp"]])
-                    rg = float(rg[0])
+                    hold = questions.get("_hold") or [(questions["grasp"], 1.0)]
+                    rg = 0.0
+                    for q, w in hold:                    # gate = "am I holding it now?"
+                        rg += w * float(judge.p_yes([gframe], [q])[0][0])
                     if args.scorer == "softgate_ema":
-                        gate_ema = rg if gate_ema is None \
-                            else GATE_ALPHA * rg + (1 - GATE_ALPHA) * gate_ema
+                        if gate_ema is None:
+                            gate_ema = rg
+                        else:
+                            a = a_fall if rg < gate_ema else a_rise
+                            gate_ema = a * rg + (1 - a) * gate_ema
                         gate_val = gate_ema
                     else:
                         gate_val = rg
@@ -484,6 +527,29 @@ def main():
                          "policy). Big speedup for oracle_dist (no judge); with "
                          "a VLM scorer every worker loads the judge, so keep 1.")
     ap.add_argument("--out", default="outputs_verifier_mpc")
+    ap.add_argument("--q-place", default=None, dest="q_place",
+                    help="override the phase-1 PLACE question. Weighted blends: "
+                         "'0.7:Is A?;0.3:Is B?' (default: ontop)")
+    ap.add_argument("--q-approach", default=None, dest="q_approach",
+                    help="override the phase-0 APPROACH question (softgate only; "
+                         "weighted blends supported; gate + drop-guard stay the "
+                         "hold question)")
+    ap.add_argument("--q-hold", default=None, dest="q_hold",
+                    help="override the softgate GATE + drop-guard 'holding' "
+                         "question (default: grasp; weighted blends supported)")
+    ap.add_argument("--seed-start", type=int, default=None, dest="seed_start",
+                    help="override cfg seed_start (fresh-seed replays)")
+    ap.add_argument("--gate-alpha", type=float, default=0.35, dest="gate_alpha",
+                    help="softgate_ema smoothing constant (symmetric): "
+                         "gate_ema = a*p(grasp) + (1-a)*gate_ema. Default 0.35.")
+    ap.add_argument("--gate-alpha-fall", type=float, default=None, dest="gate_alpha_fall",
+                    help="asymmetric EMA: constant used when the gate FALLS "
+                         "(p(grasp) < gate_ema, i.e. a drop). Larger = faster "
+                         "drop response. Defaults to --gate-alpha.")
+    ap.add_argument("--gate-alpha-rise", type=float, default=None, dest="gate_alpha_rise",
+                    help="asymmetric EMA: constant used when the gate RISES. "
+                         "Smaller = smoother against false dips. Defaults to "
+                         "--gate-alpha.")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
 
@@ -504,6 +570,11 @@ def main():
     goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
                             {"block_combo": cfg["block_combo"]})
     questions = build_questions(cfg)
+    for key, val in (("_approach", args.q_approach), ("_place", args.q_place),
+                     ("_hold", args.q_hold)):
+        wq = parse_wq(val)
+        if wq:
+            questions[key] = wq
     judge_view = JudgeView(env, args.judge_alpha) \
         if args.judge_alpha is not None else None
     probe = OracleProbe(env, cfg)
@@ -516,7 +587,8 @@ def main():
         tag += "_templadder"
     detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}_L{args.lookahead}") \
         if args.save_frames else None
-    seeds = [cfg["seed_start"] + i for i in range(args.seeds)]
+    seed0 = args.seed_start if args.seed_start is not None else cfg["seed_start"]
+    seeds = [seed0 + i for i in range(args.seeds)]
     results, wins = [], 0
 
     def one(seed, _env, _goal, _probe, _jview):
