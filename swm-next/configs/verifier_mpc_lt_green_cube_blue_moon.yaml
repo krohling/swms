@@ -1,0 +1,16 @@
+# Verifier-guided MPC on LangTable (push green_cube to blue_moon).
+# Protocol mirrors configs/eval_base_diffusion_lt.yaml: 60 cycles x 2 executed
+# actions, horizon 16. Runs inside the LangTable container
+# (Dockerfile.langtable); the judge runs OUTSIDE via judge_url
+# (judge_server.py on host MPS or a GPU box).
+env_type: lang_table
+device: cpu                    # diffusion policy device (container = CPU)
+seed_start: 6000
+block_combo: [green_cube, blue_moon]
+diffusion_path: ckpts/lt_base_diffusion/green_cube_blue_moon.pt
+max_cycles: 60                 # matches eval protocol num_steps
+actions_per_cycle: 2           # matches eval protocol num_actions_executed
+judge_url: http://host.docker.internal:8901
+judge_upscale: 2               # 180x320 -> 360x640 for the VLM (measured: 0.485 -> 0.992 on touching)
+model_id: Qwen/Qwen3-VL-8B-Instruct   # used only if judge_url is unset
+batch: 8
