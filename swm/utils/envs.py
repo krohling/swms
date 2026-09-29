@@ -14,6 +14,21 @@ class LangTableEnv(BaseEnv):
     def get_state(self):
         return self.env.get_pybullet_state()
 
+    def set_state(self, state):
+        """Restore a state captured by get_state (verifier-MPC candidate
+        rollouts: save -> rollout -> restore). Uses the underlying env's
+        set_pybullet_state (per-object ObjState restore)."""
+        self.env.set_pybullet_state(state)
+
+    def save_state_native(self):
+        """Full-engine in-memory snapshot (pybullet saveState): solver/contact
+        caches included. Returns a snapshot id valid within this process."""
+        return self.env._pybullet_client.saveState()
+
+    def restore_state_native(self, snapshot_id):
+        """Restore a save_state_native snapshot (pybullet restoreState)."""
+        self.env._pybullet_client.restoreState(snapshot_id)
+
     def project_actions_to_camera_frame(self, actions: np.ndarray) -> np.ndarray:
         actions = np.cumsum(actions, axis=0)
         actions = self.get_eef_pose() + actions
