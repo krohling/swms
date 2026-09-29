@@ -589,17 +589,22 @@ def run_lt_episode(env, goal, judge, cfg, args, seed, detail_dir=None,
                 env.set_state(S)            # python-side pose + ObjState
                 env.restore_state_native(sid)   # engine snapshot
 
-            anchor = np.asarray(frame, dtype=np.uint8)
+            # Judge frames are rendered natively at judge_native_scale x the
+            # env resolution (same camera/FOV, real detail — the 180x320 obs
+            # stream starves the VLM). Policy/obs pipeline stays at native res.
+            ns = int(cfg.get("judge_native_scale", 1))
+            anchor = env.get_judge_frame(ns)
             end_frames, all_cand_frames = [], []
             for ci, c in enumerate(candidates):
                 restore()
                 f = frame
-                cand_frames = [anchor.copy()] if detail_dir is not None else None
+                cand_frames = [np.asarray(frame, dtype=np.uint8)] \
+                    if detail_dir is not None else None
                 for a in c:
                     f = env.step(np.asarray(a))
                     if cand_frames is not None:
                         cand_frames.append(np.asarray(f, dtype=np.uint8))
-                end_frames.append(np.asarray(f, dtype=np.uint8))
+                end_frames.append(env.get_judge_frame(ns))
                 cand_oracle.append(probe.read())
                 if cand_frames is not None:
                     all_cand_frames.append(cand_frames)

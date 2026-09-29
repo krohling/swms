@@ -11,6 +11,6 @@ diffusion_path: ckpts/lt_base_diffusion/red_moon_green_star.pt
 max_cycles: 60                 # matches eval protocol num_steps
 actions_per_cycle: 2           # matches eval protocol num_actions_executed
 judge_url: http://host.docker.internal:8901
-judge_upscale: 2               # 180x320 -> 360x640 for the VLM (measured: 0.485 -> 0.992 on touching)
+judge_native_scale: 2         # native 360x640 render for the judge (real detail, same FOV; obs/policy stay 180x320)
 model_id: Qwen/Qwen3-VL-8B-Instruct   # used only if judge_url is unset
 batch: 8
