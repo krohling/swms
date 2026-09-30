@@ -600,10 +600,37 @@ def run_lt_episode(env, goal, judge, cfg, args, seed, detail_dir=None,
                 f = frame
                 cand_frames = [np.asarray(frame, dtype=np.uint8)] \
                     if detail_dir is not None else None
+                # deep lookahead: candidate differences at chunk scale are
+                # ~1 cm (sub-perceptual for the judge); rolling the policy
+                # closed-loop in sim past the sampled chunk amplifies the
+                # separation before scoring. Policy obs history is snapshotted
+                # and restored so rollouts don't pollute the real episode.
+                deep = args.lookahead > len(c)
+                if deep:
+                    from collections import deque
+                    with policy._lock:
+                        buf = deque(policy.obs_deque,
+                                    maxlen=policy.obs_deque.maxlen)
                 for a in c:
                     f = env.step(np.asarray(a))
                     if cand_frames is not None:
                         cand_frames.append(np.asarray(f, dtype=np.uint8))
+                    if deep:
+                        policy.add_obs(f)
+                done_steps = len(c)
+                while done_steps < args.lookahead:
+                    torch.manual_seed(hash((seed, cycle, ci, done_steps)) % 2**31)
+                    chunk = policy.get_action()
+                    for a in chunk[: args.lookahead - done_steps]:
+                        f = env.step(np.asarray(a))
+                        if cand_frames is not None:
+                            cand_frames.append(np.asarray(f, dtype=np.uint8))
+                        policy.add_obs(f)
+                    done_steps += min(len(chunk), args.lookahead - done_steps)
+                if deep:
+                    with policy._lock:
+                        policy.obs_deque.clear()
+                        policy.obs_deque.extend(buf)
                 end_frames.append(env.get_judge_frame(ns))
                 cand_oracle.append(probe.read())
                 if cand_frames is not None:
@@ -682,6 +709,7 @@ def main_lt(args, cfg):
     tag = "lt_" + args.scorer.replace(":", "_")
     if temps is not None:
         tag += "_templadder"
+    tag += f"_L{args.lookahead}"
     detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}") \
         if args.save_frames else None
     seed0 = args.seed_start if args.seed_start is not None else cfg["seed_start"]
