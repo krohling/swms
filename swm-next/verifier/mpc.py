@@ -496,6 +496,244 @@ def _worker_seed(seed):
                              probe=w["probe"], temps=w["temps"])
 
 
+# ---------------------------------------------------------------------------
+# LangTable branch (env_type: lang_table). Push task is SINGLE-PHASE (no
+# grasp), so there is no gate/softgate here: the verifier value is the
+# weighted push-question blend from the author framework
+# (0.8 * "is X touching Y?" [end frame] + 0.2 * "are X and Y closer
+# together?" [anchor,end frame PAIR]). Candidate rollouts use the Phase-1
+# validated deterministic restore: deterministicOverlappingPairs=1 + combo
+# restore (set_state THEN restore_state_native); see test_lt_set_state.py.
+# Protocol mirrors configs/eval_base_diffusion_lt.yaml: 60 cycles x 2
+# executed actions, horizon 16, action_dim 2.
+# ---------------------------------------------------------------------------
+
+def make_lt_env(cfg):
+    from swm.utils.envs import get_lang_table_env
+    env = get_lang_table_env({"ood": bool(cfg.get("ood", False)),
+                              "block_combo": list(cfg["block_combo"])},
+                             seed=int(cfg["seed_start"]))
+    # Phase-1 determinism requirement (broadphase order independence)
+    env.env._pybullet_client.setPhysicsEngineParameter(
+        deterministicOverlappingPairs=1)
+    return env
+
+
+class LTProbe:
+    """Ground-truth block/peg xy poses from the sim (never the judge)."""
+
+    def __init__(self, env, goal):
+        self.env, self.goal = env, goal
+
+    def read(self):
+        st = self.env.env.get_block_states()
+
+        def get(name):
+            key = name if name in st else name.replace("_", " ")
+            return np.asarray(st[key], dtype=float)
+
+        b1 = get(self.goal.info.block1)
+        b2 = get(self.goal.info.block2)
+        peg = np.asarray(st["peg"], dtype=float)
+        return dict(
+            b1=[round(float(x), 4) for x in b1],
+            b2=[round(float(x), 4) for x in b2],
+            peg=[round(float(x), 4) for x in peg],
+            dist=round(float(np.linalg.norm(b1 - b2)), 4),
+            dist_peg_b1=round(float(np.linalg.norm(peg - b1)), 4))
+
+
+def build_lt_questions(goal):
+    """[(question, weight, kind)] — kind 'pair' questions compare the anchor
+    (committed) frame against the candidate end frame."""
+    b1 = goal.info.block1.replace("_", " ")
+    b2 = goal.info.block2.replace("_", " ")
+    return [
+        (f"Is the {b1} touching the {b2}?", 0.8, "single"),
+        (f"Are the {b1} and {b2} closer together?", 0.2, "pair"),
+    ]
+
+
+def run_lt_episode(env, goal, judge, cfg, args, seed, detail_dir=None,
+                   temps=None):
+    torch.manual_seed(hash((seed, "mpc")) % 2**31)
+    np.random.seed(hash(("mpc", seed)) % 2**31)
+    # In-place reseed: goal.reward_function shares this RandomState object,
+    # so .seed() (not reassignment) keeps both views consistent. LT's
+    # reset_env ignores its seed arg; scene layout comes from this rng.
+    env.env._rng.seed(seed)
+    frame = goal.reset_env(seed=seed)
+    policy = DiffusionPolicy.load(cfg["diffusion_path"], device=cfg["device"])
+    policy.add_obs(frame)
+    questions = build_lt_questions(goal)
+    probe = LTProbe(env, goal)
+    n_exec = cfg["actions_per_cycle"]
+    log = []
+    ep_dir = None
+    if detail_dir is not None:
+        ep_dir = os.path.join(detail_dir, f"seed_{seed}")
+        os.makedirs(ep_dir, exist_ok=True)
+    traj_frames = [np.asarray(frame, dtype=np.uint8)] if detail_dir else None
+    done = False
+    for cycle in range(cfg["max_cycles"]):
+        torch.manual_seed(hash((seed, cycle)) % 2**31)
+        candidates = np.asarray(policy.sample_trajs(args.k, temperatures=temps))
+        scores, cand_oracle = [0.0], []
+        pick = 0
+        if args.k > 1:
+            S = env.get_state()
+            env.set_state(S)
+            sid = env.save_state_native()
+
+            def restore():
+                env.set_state(S)            # python-side pose + ObjState
+                env.restore_state_native(sid)   # engine snapshot
+
+            # Judge frames are rendered natively at judge_native_scale x the
+            # env resolution (same camera/FOV, real detail — the 180x320 obs
+            # stream starves the VLM). Policy/obs pipeline stays at native res.
+            ns = int(cfg.get("judge_native_scale", 1))
+            anchor = env.get_judge_frame(ns)
+            end_frames, all_cand_frames = [], []
+            for ci, c in enumerate(candidates):
+                restore()
+                f = frame
+                cand_frames = [np.asarray(frame, dtype=np.uint8)] \
+                    if detail_dir is not None else None
+                # deep lookahead: candidate differences at chunk scale are
+                # ~1 cm (sub-perceptual for the judge); rolling the policy
+                # closed-loop in sim past the sampled chunk amplifies the
+                # separation before scoring. Policy obs history is snapshotted
+                # and restored so rollouts don't pollute the real episode.
+                deep = args.lookahead > len(c)
+                if deep:
+                    from collections import deque
+                    with policy._lock:
+                        buf = deque(policy.obs_deque,
+                                    maxlen=policy.obs_deque.maxlen)
+                for a in c:
+                    f = env.step(np.asarray(a))
+                    if cand_frames is not None:
+                        cand_frames.append(np.asarray(f, dtype=np.uint8))
+                    if deep:
+                        policy.add_obs(f)
+                done_steps = len(c)
+                while done_steps < args.lookahead:
+                    torch.manual_seed(hash((seed, cycle, ci, done_steps)) % 2**31)
+                    chunk = policy.get_action()
+                    for a in chunk[: args.lookahead - done_steps]:
+                        f = env.step(np.asarray(a))
+                        if cand_frames is not None:
+                            cand_frames.append(np.asarray(f, dtype=np.uint8))
+                        policy.add_obs(f)
+                    done_steps += min(len(chunk), args.lookahead - done_steps)
+                if deep:
+                    with policy._lock:
+                        policy.obs_deque.clear()
+                        policy.obs_deque.extend(buf)
+                end_frames.append(env.get_judge_frame(ns))
+                cand_oracle.append(probe.read())
+                if cand_frames is not None:
+                    all_cand_frames.append(cand_frames)
+            restore()
+            if args.scorer == "oracle_dist":
+                # Transparent push oracle: primarily how close the two blocks
+                # end up, small tiebreak for getting the peg to the push block.
+                scores = np.array([-(o["dist"] + 0.25 * o["dist_peg_b1"])
+                                   for o in cand_oracle])
+            else:
+                total = np.zeros(len(end_frames))
+                for q, w, kind in questions:
+                    imgs = ([(anchor, ef) for ef in end_frames]
+                            if kind == "pair" else list(end_frames))
+                    total += w * np.asarray(
+                        judge.p_yes(imgs, [q] * len(end_frames))[0])
+                scores = total
+            pick = int(np.argmax(scores))
+            if ep_dir is not None:
+                save_png(frame, os.path.join(ep_dir, f"c{cycle:02d}_committed.png"))
+                for ci_, f_ in enumerate(end_frames):
+                    save_png(f_, os.path.join(ep_dir, f"c{cycle:02d}_cand{ci_}.png"))
+                for ci_, cf in enumerate(all_cand_frames):
+                    save_mp4(cf, os.path.join(ep_dir, f"c{cycle:02d}_cand{ci_}.mp4"))
+        for a in candidates[pick][:n_exec]:
+            frame = env.step(np.asarray(a))
+            if traj_frames is not None:
+                traj_frames.append(np.asarray(frame, dtype=np.uint8))
+            policy.add_obs(frame)
+            if goal.get_done():
+                done = True
+                break
+        entry = dict(cycle=cycle, pick=pick,
+                     scores=[round(float(s), 4) for s in scores],
+                     oracle=probe.read())
+        if temps is not None:
+            entry["temps"] = temps
+        if args.k > 1 and cand_oracle:
+            entry["cand_oracle"] = cand_oracle
+        log.append(entry)
+        if done:
+            break
+    if traj_frames is not None and len(traj_frames) > 1:
+        save_mp4(traj_frames, os.path.join(ep_dir, "trajectory.mp4"))
+    if done:
+        return True, cycle, log
+    return False, cfg["max_cycles"], log
+
+
+def main_lt(args, cfg):
+    """LangTable eval loop: same output schema as the OGBench path so all
+    downstream analysis/report tooling works unchanged."""
+    from swm.utils.goal_generators import get_lang_table_goal
+
+    needs_judge = args.scorer != "oracle_dist" and args.k > 1
+    judge = None
+    if needs_judge:
+        if cfg.get("judge_url"):
+            from http_judge import HTTPJudge
+            judge = HTTPJudge(cfg["judge_url"],
+                              upscale=int(cfg.get("judge_upscale", 1)))
+        else:
+            from label_teacher import QwenJudge
+            judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"])
+    temps = [float(x) for x in args.temps.split(",")] if args.temps else None
+    if temps is not None:
+        args.k = len(temps)
+
+    env = make_lt_env(cfg)
+    goal = get_lang_table_goal("block_to_block", env, None, ANSWER_OPTIONS,
+                               {"block_combo": list(cfg["block_combo"]),
+                                "ood": bool(cfg.get("ood", False))})
+
+    os.makedirs(args.out, exist_ok=True)
+    tag = "lt_" + args.scorer.replace(":", "_")
+    if temps is not None:
+        tag += "_templadder"
+    tag += f"_L{args.lookahead}"
+    detail_dir = os.path.join(args.out, f"detail_{tag}_k{args.k}") \
+        if args.save_frames else None
+    seed0 = args.seed_start if args.seed_start is not None else cfg["seed_start"]
+    seeds = [seed0 + i for i in range(args.seeds)]
+    results, wins = [], 0
+    for done_n, seed in enumerate(seeds, 1):
+        success, cycles, log = run_lt_episode(
+            env, goal, judge, cfg, args, seed,
+            detail_dir=detail_dir, temps=temps)
+        wins += success
+        results.append(dict(seed=seed, success=bool(success), cycles=cycles,
+                            log=log))
+        print(f"[{done_n}/{args.seeds}] seed {seed}: "
+              f"{'success' if success else 'fail'} @ cycle {cycles} "
+              f"(running SR {wins/done_n:.0%})", flush=True)
+    out = dict(k=args.k, scorer=args.scorer, env="lang_table",
+               block_combo=list(cfg["block_combo"]), temps=temps,
+               n=args.seeds, sr=wins / args.seeds, episodes=results)
+    path = os.path.join(args.out, f"mpc_{tag}_k{args.k}.json")
+    json.dump(out, open(path, "w"), indent=1)
+    print(f"MPC_DONE: SR {wins}/{args.seeds} = {wins/args.seeds:.0%} -> {path}",
+          flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
@@ -555,6 +793,8 @@ def main():
 
     import sys
     sys.dont_write_bytecode = True
+    if cfg.get("env_type") == "lang_table":
+        return main_lt(args, cfg)
     needs_judge = args.scorer != "oracle_dist" and (
         args.k > 1 or args.scorer == "phase" or args.spec)
     judge = None

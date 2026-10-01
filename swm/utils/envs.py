@@ -14,6 +14,42 @@ class LangTableEnv(BaseEnv):
     def get_state(self):
         return self.env.get_pybullet_state()
 
+    def set_state(self, state):
+        """Restore a state captured by get_state (verifier-MPC candidate
+        rollouts: save -> rollout -> restore). Uses the underlying env's
+        set_pybullet_state (per-object ObjState restore)."""
+        self.env.set_pybullet_state(state)
+
+    def get_judge_frame(self, scale=1):
+        """Native high-resolution render for the VLM judge: same camera pose
+        and FOV (focal length and image size scale together; the GL path
+        reads only intrinsics[0]), genuinely finer pixels — NOT interpolation.
+        The policy obs pipeline (180x320) is untouched. Read-only."""
+        if scale <= 1:
+            return np.asarray(self.env.compute_state()["rgb"], dtype=np.uint8)
+        # NB: attribute WRITES don't delegate through the tf_agents GymWrapper
+        # (they'd land on the wrapper) — patch the inner env object itself.
+        lt = self.env.gym
+        orig = lt._camera_instrinsics
+        h, w = lt._image_size
+        scaled = list(orig)
+        scaled[0] = orig[0] * scale        # focal length; keeps FOV identical
+        lt._camera_instrinsics = tuple(scaled)
+        try:
+            img = lt._render_camera((h * scale, w * scale))
+        finally:
+            lt._camera_instrinsics = orig
+        return np.asarray(img, dtype=np.uint8)
+
+    def save_state_native(self):
+        """Full-engine in-memory snapshot (pybullet saveState): solver/contact
+        caches included. Returns a snapshot id valid within this process."""
+        return self.env._pybullet_client.saveState()
+
+    def restore_state_native(self, snapshot_id):
+        """Restore a save_state_native snapshot (pybullet restoreState)."""
+        self.env._pybullet_client.restoreState(snapshot_id)
+
     def project_actions_to_camera_frame(self, actions: np.ndarray) -> np.ndarray:
         actions = np.cumsum(actions, axis=0)
         actions = self.get_eef_pose() + actions
