@@ -1,0 +1,10 @@
+# Reference spec: byte-equivalent to planning's objective (StackBlocksGoal).
+name: planning
+phase0:
+  - {text: "Is the robot grasping the {top}?", weight: 1.0}
+transition:
+  text: "Is the robot grasping the {top}?"
+  threshold: 0.9
+phase1:
+  - {text: "Is the {top} on top of the {bottom}?", weight: 0.6}
+  - {text: "Is the robot grasping the {top}?", weight: 0.4}

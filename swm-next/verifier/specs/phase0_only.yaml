@@ -1,0 +1,11 @@
+# No phase machinery: grasp-question scoring for the entire episode.
+# Motivated by n=10 lift-transition run where all 5 successes completed
+# without ever leaving phase 0. Threshold 1.1 = transition can never fire.
+name: phase0_only
+phase0:
+  - {text: "Is the robot grasping the {top}?", weight: 1.0}
+transition:
+  text: "Is the robot grasping the {top}?"
+  threshold: 1.1
+phase1:
+  - {text: "Is the robot grasping the {top}?", weight: 1.0}
