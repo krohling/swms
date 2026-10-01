@@ -222,6 +222,12 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
             breakdown[q] = [round(float(v), 4) for v in p]
             total += w * p
         return total, breakdown
+    if scorer == "random":
+        # Selection-ablated control: identical candidate distribution
+        # (temperature ladder), uniform-random pick. Isolates the verifier's
+        # discrimination from the modified proposal distribution. Seeded via
+        # the global np.random stream (per-episode/cycle reseeded in callers).
+        return np.random.rand(len(end_frames)), {}
     if scorer == "progress":
         pairs = [(current, f) for f in end_frames]
         return ask(pairs, questions["progress"]), {}
@@ -636,7 +642,10 @@ def run_lt_episode(env, goal, judge, cfg, args, seed, detail_dir=None,
                 if cand_frames is not None:
                     all_cand_frames.append(cand_frames)
             restore()
-            if args.scorer == "oracle_dist":
+            if args.scorer == "random":
+                # selection-ablated control: same ladder, uniform-random pick
+                scores = np.random.rand(len(end_frames))
+            elif args.scorer == "oracle_dist":
                 # Transparent push oracle: primarily how close the two blocks
                 # end up, small tiebreak for getting the peg to the push block.
                 scores = np.array([-(o["dist"] + 0.25 * o["dist_peg_b1"])
@@ -686,7 +695,7 @@ def main_lt(args, cfg):
     downstream analysis/report tooling works unchanged."""
     from swm.utils.goal_generators import get_lang_table_goal
 
-    needs_judge = args.scorer != "oracle_dist" and args.k > 1
+    needs_judge = args.scorer not in ("oracle_dist", "random") and args.k > 1
     judge = None
     if needs_judge:
         if cfg.get("judge_url"):
@@ -795,7 +804,7 @@ def main():
     sys.dont_write_bytecode = True
     if cfg.get("env_type") == "lang_table":
         return main_lt(args, cfg)
-    needs_judge = args.scorer != "oracle_dist" and (
+    needs_judge = args.scorer not in ("oracle_dist", "random") and (
         args.k > 1 or args.scorer == "phase" or args.spec)
     judge = None
     if needs_judge:
