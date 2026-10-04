@@ -1,0 +1,27 @@
+# Qwen3-VL SWM LoRA — blue->green proposals, 200-episode dataset.
+# Recipe adopted from the validated qwen_oracle.yaml (eff 96, lr 1e-4, clip 1).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+h5_paths: [datasets_swm/bg_k16_L16.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+val_frac: 0.1
+epochs: 4
+effective_batch: 96
+micro_batch: 48                # GH200-measured (43.5/95 GB); reduce elsewhere
+learning_rate: 1.0e-4
+weight_decay: 0.0
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_batches: 60
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: bg200-eff96-lr1e4-r16
+out_dir: outputs_swm_lora/bg200
