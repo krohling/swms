@@ -61,7 +61,9 @@ class QwenSWM(nn.Module):
         self.model = get_peft_model(base, lcfg)
 
         d_model = base.config.text_config.hidden_size
-        self.projector = TrajectoryProjector(action_dim, d_model).to(dtype)
+        self.projector = TrajectoryProjector(action_dim, d_model)
+        # projector stays fp32 (stable AdamW on the zero-init scale);
+        # the scatter hook casts its output to the model dtype.
         self.horizon = horizon
 
         self.traj_id = tok.convert_tokens_to_ids(TRAJ_PLACEHOLDER)
@@ -121,7 +123,7 @@ class QwenSWM(nn.Module):
         """l = LSE(z_YES) - LSE(z_NO) at the final position. trajs: (B,H,A)
         normalized; pass zeros for the empty-trajectory/drift probe."""
         inputs = self.build_inputs(images, questions).to(self.device)
-        traj_embeds = self.projector(trajs.to(self.device))
+        traj_embeds = self.projector(trajs.to(self.device, dtype=torch.float32))
         self._pending = (inputs["input_ids"], traj_embeds)
         try:
             out = self.model(**inputs)
