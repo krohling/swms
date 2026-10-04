@@ -11,7 +11,7 @@ diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
 val_frac: 0.1
 epochs: 4
 effective_batch: 96
-micro_batch: 48                # GH200-measured (43.5/95 GB); reduce elsewhere
+micro_batch: 24               # GH200: micro48 fwd peaks 68GB; 24x4 accum = eff 96 safe
 learning_rate: 1.0e-4
 weight_decay: 0.0
 warmup_frac: 0.03
