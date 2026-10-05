@@ -72,10 +72,11 @@ def ask(judge, images, question, batch):
 
 
 def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
-                policy_name, k, temps, lookahead, batch):
+                policy_name, k, temps, lookahead, batch, exec_temp_max=None):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
     rng = np.random.RandomState(seed)          # selection RNG (random policy)
+    temp_rng = np.random.RandomState(hash((seed, "exectemp")) % 2**31)
 
     frame = goal.reset_env(seed=seed)
     goal.reset_hook()
@@ -89,8 +90,14 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
     rec = dict(frames_t=[], trajs=[], end_frames=[], labels=[], pick=[])
     done = False
     cycle = -1
+    exec_temps = []
     for cycle in range(cfg["max_cycles"]):
         torch.manual_seed(hash((seed, cycle)) % 2**31)
+        if exec_temp_max is not None:
+            # noisy-behavior capture (robot-compatible): the executed chunk is
+            # sampled at a fresh uniform temperatureevery cycle
+            temps = [float(temp_rng.uniform(0.0, exec_temp_max))]
+        exec_temps.append(list(temps))
         candidates = np.asarray(policy.sample_trajs(k, temperatures=temps))
 
         frame_t = np.asarray(frame, dtype=np.uint8)
@@ -149,6 +156,7 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
             e[i, j] = v
     grp.create_dataset("labels", data=np.stack(rec["labels"]))
     grp.create_dataset("pick", data=np.asarray(rec["pick"], dtype=np.int8))
+    grp.create_dataset("exec_temps", data=np.asarray(exec_temps, dtype=np.float32))
     grp.attrs.update(dict(
         seed=seed, policy=policy_name, success=bool(done),
         cycles=cycle + 1,
@@ -166,6 +174,11 @@ def main():
     ap.add_argument("--lookahead", type=int, default=16)
     ap.add_argument("--frac-random", type=float, default=0.3,
                     help="fraction of episodes advanced by random selection")
+    ap.add_argument("--exec-temp-max", type=float, default=None,
+                    dest="exec_temp_max",
+                    help="k=1 noisy-behavior capture: executed chunk sampled "
+                         "at t ~ U(0, this) per cycle (robot-compatible "
+                         "diversity; records exec_temps)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -202,7 +215,8 @@ def main():
                 continue
             success, cycles = run_episode(
                 h5, env, goal, judge, cfg["diffusion_path"], cfg, questions,
-                seed, flags[i], args.k, temps, args.lookahead, batch)
+                seed, flags[i], args.k, temps, args.lookahead, batch,
+                exec_temp_max=args.exec_temp_max)
             wins += success
             print(f"[{i+1}/{args.episodes}] seed {seed} ({flags[i]}): "
                   f"{'success' if success else 'fail'} @ {cycles} "
