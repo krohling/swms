@@ -172,7 +172,7 @@ def main():
     cfg = yaml.safe_load(open(args.config))
     assert not (6000 <= args.seed_start <= 6100), \
         "seeds 6000-6099 are reserved for evaluation"
-    temps = [i * 2.0 / (args.k - 1) for i in range(args.k)]
+    temps = [i * 2.0 / (args.k - 1) for i in range(args.k)] if args.k > 1 else [0.0]
     batch = int(cfg.get("batch", 8))
 
     from label_teacher import QwenJudge
