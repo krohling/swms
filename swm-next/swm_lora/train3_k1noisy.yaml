@@ -1,0 +1,33 @@
+# Run 3: proven-recipe transfer — executed-only noisy chunks (k=1, t~U(0,2)),
+# 2 planner + 6 aux questions, pointwise soft-CE, ~their 6.1M-sample budget.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+h5_paths: [datasets_swm/bg_k1_exec_s12000.h5, datasets_swm/bg_k1_exec_s13350.h5,
+           datasets_swm/bg_k1_exec_s14700.h5, datasets_swm/bg_k1_exec_s16050.h5,
+           datasets_swm/bg_k1_exec_s17400.h5, datasets_swm/bg_k1_exec_s18750.h5,
+           datasets_swm/bg_k1_exec_s20100.h5, datasets_swm/bg_k1_exec_s21450.h5]
+rank_h5_paths: [datasets_swm/bg_k16_L16.h5, datasets_swm/bg_k16_L16_ext600.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+use_aux: true
+binarize_aux: false
+val_frac: 0.05
+epochs: 2                      # ~2 x ~3.3M samples ~= their 6.1M consumption
+effective_batch: 96
+micro_batch: 24
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 1000
+val_max_batches: 60
+rank_val_lists: 120
+ckpt_every: 2000
+resume_every: 1000
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: run3-k1noisy-aux
+out_dir: outputs_swm_lora/run3_k1noisy

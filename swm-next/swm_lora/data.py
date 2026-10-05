@@ -151,3 +151,54 @@ def collate_cycles(batch):
     return dict(images=images, questions=questions, k=k, m=len(batch),
                 trajs=torch.cat([b["trajs"] for b in batch]),
                 targets=torch.cat([b["targets"] for b in batch]))
+
+
+class ExecutedChunkDataset(Dataset):
+    """Run-3 unit: one (executed chunk, question) sample from k=1 noisy
+    capture files. Questions = 2 planner labels + the 6 aux questions stored
+    by datagen --aux-labels. binarize_aux thresholds aux targets at 0.5
+    (oracle-style hard targets ablation); planner targets stay soft."""
+
+    def __init__(self, h5_paths, episodes, amin, amax, use_aux=True,
+                 binarize_aux=False):
+        self.paths = list(h5_paths)
+        self.amin, self.amax = amin, amax
+        self.use_aux, self.binarize_aux = use_aux, binarize_aux
+        self._files = None
+        self.index = []    # (pi, ep, cycle, source, qi)  source: 0=labels 1=aux
+        for pi, ep in episodes:
+            with h5py.File(self.paths[pi], "r") as f:
+                g = f[ep]
+                C = g["labels"].shape[0]
+                qs = [str(g.attrs["q_approach"]), str(g.attrs["q_place"])]
+                aux_qs = [str(q) for q in g.attrs.get("aux_questions", [])] \
+                    if use_aux else []
+            for c in range(C):
+                for qi in range(2):
+                    self.index.append((pi, ep, c, 0, qi, qs[qi]))
+                for qi in range(len(aux_qs)):
+                    self.index.append((pi, ep, c, 1, qi, aux_qs[qi]))
+
+    def _f(self, pi):
+        if self._files is None:
+            self._files = [None] * len(self.paths)
+        if self._files[pi] is None:
+            self._files[pi] = h5py.File(self.paths[pi], "r")
+        return self._files[pi]
+
+    def __len__(self):
+        return len(self.index)
+
+    def __getitem__(self, i):
+        pi, ep, c, src, qi, q = self.index[i]
+        g = self._f(pi)[ep]
+        img = Image.open(io.BytesIO(g["frames_t"][c].tobytes())).convert("RGB")
+        traj = normalize(g["trajs"][c, 0].astype(np.float32), self.amin, self.amax)
+        if src == 0:
+            t = np.float32(g["labels"][c, 0, qi])        # 0=approach 1=place
+        else:
+            t = np.float32(g["aux_labels"][c, 0, qi])
+            if self.binarize_aux:
+                t = np.float32(t > 0.5)
+        return dict(image=img, question=q, traj=torch.from_numpy(traj),
+                    target=torch.tensor(t))
