@@ -97,3 +97,57 @@ def collate(batch):
 def save_split(path, train, val, h5_paths):
     json.dump(dict(h5_paths=[str(p) for p in h5_paths],
                    train=train, val=val), open(path, "w"), indent=1)
+
+
+class CycleDataset(Dataset):
+    """Run-2 unit: one (planning step, question) = the frame + all k sibling
+    proposals + their teacher p's. The within-cycle ranking loss needs the
+    siblings together; frame-conditional shortcuts contribute exactly zero
+    to that term because everything but the trajectories is shared."""
+
+    def __init__(self, h5_paths, episodes, amin, amax):
+        self.paths = list(h5_paths)
+        self.amin, self.amax = amin, amax
+        self._files = None
+        self.index = []                      # (path_idx, ep, cycle, col, q)
+        for pi, ep in episodes:
+            with h5py.File(self.paths[pi], "r") as f:
+                g = f[ep]
+                C = g["labels"].shape[0]
+                qs = {a: g.attrs[a] for a, _ in QUESTION_KEYS}
+            for c in range(C):
+                for attr, col in QUESTION_KEYS:
+                    self.index.append((pi, ep, c, col, qs[attr]))
+
+    def _f(self, pi):
+        if self._files is None:
+            self._files = [None] * len(self.paths)
+        if self._files[pi] is None:
+            self._files[pi] = h5py.File(self.paths[pi], "r")
+        return self._files[pi]
+
+    def __len__(self):
+        return len(self.index)
+
+    def __getitem__(self, i):
+        pi, ep, c, col, q = self.index[i]
+        g = self._f(pi)[ep]
+        img = Image.open(io.BytesIO(g["frames_t"][c].tobytes())).convert("RGB")
+        trajs = normalize(g["trajs"][c].astype(np.float32), self.amin, self.amax)
+        targets = g["labels"][c, :, col].astype(np.float32)
+        return dict(image=img, question=str(q),
+                    trajs=torch.from_numpy(trajs),
+                    targets=torch.from_numpy(targets))
+
+
+def collate_cycles(batch):
+    """Flatten M cycles x k proposals into one forward batch; keeps cycle
+    boundaries for the listwise term."""
+    k = batch[0]["trajs"].shape[0]
+    images, questions = [], []
+    for b in batch:
+        images += [b["image"]] * k
+        questions += [b["question"]] * k
+    return dict(images=images, questions=questions, k=k, m=len(batch),
+                trajs=torch.cat([b["trajs"] for b in batch]),
+                targets=torch.cat([b["targets"] for b in batch]))

@@ -29,11 +29,15 @@ NO_VARIANTS = [" No", " no", "No", "no"]
 
 
 class TrajectoryProjector(nn.Module):
-    def __init__(self, action_dim, d_model, hidden=512):
+    def __init__(self, action_dim, d_model, hidden=512, init_scale=0.0):
+        """init_scale=0 -> exact-base at step 0 (run-1 behavior; shown to let
+        the frame-mean shortcut win while the gate stays shut). init_scale>0
+        (run-2: 0.1) opens the trajectory channel from the start; LoRA B=0
+        still keeps the LM itself at base behavior at init."""
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(action_dim, hidden), nn.GELU(), nn.Linear(hidden, d_model))
-        self.scale = nn.Parameter(torch.zeros(1))   # zero-init: identity at start
+        self.scale = nn.Parameter(torch.tensor([float(init_scale)]))
 
     def forward(self, actions):                     # (B, H, A) -> (B, H, D)
         return self.net(actions) * self.scale
@@ -42,7 +46,7 @@ class TrajectoryProjector(nn.Module):
 class QwenSWM(nn.Module):
     def __init__(self, model_id="Qwen/Qwen3-VL-8B-Instruct", action_dim=5,
                  horizon=16, lora_r=16, lora_alpha=32, lora_dropout=0.05,
-                 device="cuda", dtype=torch.bfloat16):
+                 device="cuda", dtype=torch.bfloat16, proj_init_scale=0.0):
         super().__init__()
         from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
         from peft import LoraConfig, get_peft_model
@@ -61,7 +65,8 @@ class QwenSWM(nn.Module):
         self.model = get_peft_model(base, lcfg)
 
         d_model = base.config.text_config.hidden_size
-        self.projector = TrajectoryProjector(action_dim, d_model)
+        self.projector = TrajectoryProjector(action_dim, d_model,
+                                             init_scale=proj_init_scale)
         # projector stays fp32 (stable AdamW on the zero-init scale);
         # the scatter hook casts its output to the model dtype.
         self.horizon = horizon

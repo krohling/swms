@@ -1,0 +1,28 @@
+# Run 2a: ranking loss + open gate, 200-episode dataset (loss-fix attribution).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+h5_paths: [datasets_swm/bg_k16_L16.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+val_frac: 0.1
+epochs: 4
+micro_cycles: 1                 # 16 proposal-forwards per micro-step
+accum_cycles: 6                 # eff 6 lists = 96 proposals / opt step
+lambda_rank: 1.0
+rank_temperature: 1.0
+proj_init_scale: 0.1
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: rank2a-bg200
+out_dir: outputs_swm_lora/rank2a_bg200
