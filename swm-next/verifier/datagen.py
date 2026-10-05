@@ -72,7 +72,8 @@ def ask(judge, images, question, batch):
 
 
 def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
-                policy_name, k, temps, lookahead, batch, exec_temp_max=None):
+                policy_name, k, temps, lookahead, batch, exec_temp_max=None,
+                aux_labels=False):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
     rng = np.random.RandomState(seed)          # selection RNG (random policy)
@@ -86,8 +87,12 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
     n_exec = cfg["actions_per_cycle"]
     q_app, q_place, q_hold = (questions["grasp"], questions["ontop"],
                               questions["grasp"])
+    aux_qs = ([questions[k] for k in
+               ("near", "above_cube", "touching", "lifted", "above_goal",
+                "close_goal")] if aux_labels else [])
     gate_ema = None
-    rec = dict(frames_t=[], trajs=[], end_frames=[], labels=[], pick=[])
+    rec = dict(frames_t=[], trajs=[], end_frames=[], labels=[], pick=[],
+               aux=[])
     done = False
     cycle = -1
     exec_temps = []
@@ -116,6 +121,10 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
         p_app = ask(judge, end_frames, q_app, batch)
         p_place = ask(judge, end_frames, q_place, batch)
         p_hold = p_app if q_hold == q_app else ask(judge, end_frames, q_hold, batch)
+        if aux_qs:
+            rec["aux"].append(np.stack(
+                [ask(judge, end_frames, q, batch) for q in aux_qs],
+                axis=-1).astype(np.float32))        # (k, Q)
 
         if policy_name == "verifier":
             rg = float(judge.p_yes([frame_t], [questions["grasp"]])[0][0])
@@ -157,6 +166,9 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
     grp.create_dataset("labels", data=np.stack(rec["labels"]))
     grp.create_dataset("pick", data=np.asarray(rec["pick"], dtype=np.int8))
     grp.create_dataset("exec_temps", data=np.asarray(exec_temps, dtype=np.float32))
+    if rec["aux"]:
+        grp.create_dataset("aux_labels", data=np.stack(rec["aux"]))
+        grp.attrs["aux_questions"] = [q.encode() for q in aux_qs]
     grp.attrs.update(dict(
         seed=seed, policy=policy_name, success=bool(done),
         cycles=cycle + 1,
@@ -174,6 +186,10 @@ def main():
     ap.add_argument("--lookahead", type=int, default=16)
     ap.add_argument("--frac-random", type=float, default=0.3,
                     help="fraction of episodes advanced by random selection")
+    ap.add_argument("--aux-labels", action="store_true",
+                    help="also teacher-label the 6 shaped auxiliary questions "
+                         "(near/above/touching/lifted/above_goal/close_goal) "
+                         "per proposal end frame -> aux_labels (C,k,6)")
     ap.add_argument("--exec-temp-max", type=float, default=None,
                     dest="exec_temp_max",
                     help="k=1 noisy-behavior capture: executed chunk sampled "
@@ -216,7 +232,7 @@ def main():
             success, cycles = run_episode(
                 h5, env, goal, judge, cfg["diffusion_path"], cfg, questions,
                 seed, flags[i], args.k, temps, args.lookahead, batch,
-                exec_temp_max=args.exec_temp_max)
+                exec_temp_max=args.exec_temp_max, aux_labels=args.aux_labels)
             wins += success
             print(f"[{i+1}/{args.episodes}] seed {seed} ({flags[i]}): "
                   f"{'success' if success else 'fail'} @ {cycles} "
