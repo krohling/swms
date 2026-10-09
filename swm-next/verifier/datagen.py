@@ -244,10 +244,16 @@ def main():
         args.frac_random = float(gen.get("frac_random", 0.3))
     if args.min_sep is None:
         args.min_sep = float(gen.get("min_sep", 0.0))
+    # -1.0 is an argparse sentinel for "not passed on CLI" (a real temperature
+    # is never negative): fall back to config; absent there -> None (disabled).
     if args.exec_temp_max == -1.0:
         args.exec_temp_max = gen.get("exec_temp_max", None)
         if args.exec_temp_max is not None:
             args.exec_temp_max = float(args.exec_temp_max)
+    # exec_temp_max is the k=1 capture knob (executed chunk at t~U(0,max));
+    # with k>1 the ladder + selection already diversify execution temps, and
+    # a single-draw override would clobber the ladder.
+    assert args.exec_temp_max is None or args.k == 1,         "--exec-temp-max requires k=1 (branched mode gets temp diversity from the ladder)"
     assert not (6000 <= args.seed_start <= 6100), \
         "seeds 6000-6099 are reserved for evaluation"
     temps = [i * 2.0 / (args.k - 1) for i in range(args.k)] if args.k > 1 else [0.0]
