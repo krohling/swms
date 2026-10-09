@@ -1,27 +1,24 @@
-"""Run-4 trainer: cycle-batched POINTWISE BCE on branched (sibling) data.
+"""Train a Qwen3-VL SWM LoRA on branched proposal datasets (value
+distillation on teacher p_yes).
 
-Default loss is purely pointwise — per proposal i with student logit l_i and
+Loss: pointwise soft-target BCE per proposal — for student logit l_i and
 teacher prob p_i:
   L = mean_i [ softplus(l_i) - p_i * l_i ]        (BCEWithLogits, soft target)
+Optionally, lambda_rank > 0 adds a listwise KL over each cycle's proposals:
+  L_rank = KL( softmax(t/T) || softmax(l/T) ),  t_i = logit(clip(p_i)).
 
-What makes it different from run 1 is the BATCHING, not the loss: each batch
-element is one (cycle, question) list — the frame plus all k sibling
-proposals together. Within an update the siblings' shared-frame gradients
-sum to the cycle-mean error (trajectory-driven deviations cancel in the
-frame pathway) while each proposal's deviation still flows through its own
-trajectory tokens — variance-routing that nudges credit toward the
-trajectory channel without any auxiliary loss term.
+Batching: each batch element is one (cycle, question) list — the frame plus
+all k sibling proposals forwarded together (micro_cycles lists per micro-step,
+accumulated to the effective batch).
 
-Escalation path (OFF by default): lambda_rank > 0 re-enables the run-2
-listwise KL over each list, KL(softmax(t/T) || softmax(l/T)) with
-t_i = logit(clip(p_i)). Use if val within-cycle rho flatlines at 0 with the
-run-1 shortcut signature (pooled Spearman up, rho pinned).
+Data: questions are enumerated from the dataset files themselves; cfg
+"questions" selects "planner" | "all" | [explicit list of question strings].
 
-Questions are enumerated from the dataset files themselves; cfg "questions"
-selects: "planner" | "all" | [explicit list of question strings].
-Other inherited pieces: projector open-init (proj_init_scale), native
-within-cycle Spearman rho at every val pass, drift probe, atomic resume
-states, wandb artifacts.
+Validation: loss/MAE, within-cycle Spearman rho (rank correlation across each
+held-out cycle's siblings), and a base-drift probe (empty-trajectory p_yes vs
+step-0 outputs). Checkpoints: eval/export adapters every ckpt_every steps
+(wandb artifacts) + atomic full resume states (optimizer/scheduler/RNG,
+keep-2); --resume auto restarts from the newest valid state.
 
 Usage:
   python swm-next/swm_lora/train4.py --config swm-next/swm_lora/train4_hybrid.yaml
