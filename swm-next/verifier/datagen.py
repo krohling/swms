@@ -226,7 +226,7 @@ def main():
                     help="also teacher-label the 6 shaped auxiliary questions "
                          "(near/above/touching/lifted/above_goal/close_goal) "
                          "per proposal end frame -> aux_labels (C,k,6)")
-    ap.add_argument("--exec-temp-max", type=float, default=-1.0,
+    ap.add_argument("--exec-temp-max", type=float, default=None,
                     dest="exec_temp_max",
                     help="k=1 noisy-behavior capture: executed chunk sampled "
                          "at t ~ U(0, this) per cycle (robot-compatible "
@@ -244,12 +244,11 @@ def main():
         args.frac_random = float(gen.get("frac_random", 0.3))
     if args.min_sep is None:
         args.min_sep = float(gen.get("min_sep", 0.0))
-    # -1.0 is an argparse sentinel for "not passed on CLI" (a real temperature
-    # is never negative): fall back to config; absent there -> None (disabled).
-    if args.exec_temp_max == -1.0:
+    # not passed on CLI -> config; absent there too -> None (disabled)
+    if args.exec_temp_max is None:
         args.exec_temp_max = gen.get("exec_temp_max", None)
-        if args.exec_temp_max is not None:
-            args.exec_temp_max = float(args.exec_temp_max)
+    if args.exec_temp_max is not None:
+        args.exec_temp_max = float(args.exec_temp_max)
     # exec_temp_max is the k=1 capture knob (executed chunk at t~U(0,max));
     # with k>1 the ladder + selection already diversify execution temps, and
     # a single-draw override would clobber the ladder.
@@ -293,8 +292,8 @@ def main():
             lookahead=args.lookahead, temps=temps,
             frac_random=args.frac_random, model_id=cfg["model_id"],
             min_sep=args.min_sep,
-            exec_temp_max=(args.exec_temp_max if args.exec_temp_max
-                           is not None else -1.0),
+            **({"exec_temp_max": args.exec_temp_max}
+               if args.exec_temp_max is not None else {}),
             recipe=_json.dumps(dict(
                 config=cfg, k=args.k, lookahead=args.lookahead,
                 frac_random=args.frac_random, min_sep=args.min_sep,
