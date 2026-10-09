@@ -210,11 +210,14 @@ def main():
     ap.add_argument("--config", required=True)
     ap.add_argument("--episodes", type=int, default=200)
     ap.add_argument("--seed-start", type=int, default=10000)
-    ap.add_argument("--k", type=int, default=16)
-    ap.add_argument("--lookahead", type=int, default=16)
-    ap.add_argument("--frac-random", type=float, default=0.3,
+    # dataset-defining knobs: config "generation" section is the default,
+    # explicit CLI overrides it (invocation knobs --episodes/--seed-start/
+    # --out stay CLI-only: they vary per shard of the same recipe)
+    ap.add_argument("--k", type=int, default=None)
+    ap.add_argument("--lookahead", type=int, default=None)
+    ap.add_argument("--frac-random", type=float, default=None,
                     help="fraction of episodes advanced by random selection")
-    ap.add_argument("--min-sep", type=float, default=0.0, dest="min_sep",
+    ap.add_argument("--min-sep", type=float, default=None, dest="min_sep",
                     help="diversity-enforcing rejection sampling: resample "
                          "proposals closer than this (mean per-step L2, raw "
                          "action units; calibrated default suggestion 0.025; "
@@ -223,7 +226,7 @@ def main():
                     help="also teacher-label the 6 shaped auxiliary questions "
                          "(near/above/touching/lifted/above_goal/close_goal) "
                          "per proposal end frame -> aux_labels (C,k,6)")
-    ap.add_argument("--exec-temp-max", type=float, default=None,
+    ap.add_argument("--exec-temp-max", type=float, default=-1.0,
                     dest="exec_temp_max",
                     help="k=1 noisy-behavior capture: executed chunk sampled "
                          "at t ~ U(0, this) per cycle (robot-compatible "
@@ -232,6 +235,19 @@ def main():
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
+    gen = cfg.get("generation") or {}
+    if args.k is None:
+        args.k = int(gen.get("k", 16))
+    if args.lookahead is None:
+        args.lookahead = int(gen.get("lookahead", 16))
+    if args.frac_random is None:
+        args.frac_random = float(gen.get("frac_random", 0.3))
+    if args.min_sep is None:
+        args.min_sep = float(gen.get("min_sep", 0.0))
+    if args.exec_temp_max == -1.0:
+        args.exec_temp_max = gen.get("exec_temp_max", None)
+        if args.exec_temp_max is not None:
+            args.exec_temp_max = float(args.exec_temp_max)
     assert not (6000 <= args.seed_start <= 6100), \
         "seeds 6000-6099 are reserved for evaluation"
     temps = [i * 2.0 / (args.k - 1) for i in range(args.k)] if args.k > 1 else [0.0]
@@ -265,10 +281,20 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     mode = "a" if os.path.exists(args.out) else "w"
     with h5py.File(args.out, mode) as h5:
+        import json as _json
         h5.attrs.update(dict(
             task="_".join(cfg["block_combo"]), k=args.k,
             lookahead=args.lookahead, temps=temps,
-            frac_random=args.frac_random, model_id=cfg["model_id"]))
+            frac_random=args.frac_random, model_id=cfg["model_id"],
+            min_sep=args.min_sep,
+            exec_temp_max=(args.exec_temp_max if args.exec_temp_max
+                           is not None else -1.0),
+            recipe=_json.dumps(dict(
+                config=cfg, k=args.k, lookahead=args.lookahead,
+                frac_random=args.frac_random, min_sep=args.min_sep,
+                exec_temp_max=args.exec_temp_max,
+                q_approach=q_app, q_place=q_place, q_hold=q_hold,
+                aux_questions=aux_qs))))
         wins = 0
         for i in range(args.episodes):
             seed = args.seed_start + i
