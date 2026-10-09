@@ -125,7 +125,7 @@ def main():
         model.model.eval()
         dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_cycles,
                         num_workers=2)
-        bces, rhos, ps, ts = [], [], [], []
+        bces, rhos, rhos_f, ps, ts = [], [], [], [], []
         drift = []
         with torch.no_grad():
             seen = 0
@@ -137,6 +137,13 @@ def main():
                 bces.append(float(model.loss(l, tt)))
                 p = torch.sigmoid(l).cpu().numpy()
                 rhos += within_cycle_rho(p, b["targets"].numpy(), b["k"], b["m"])
+                # spread-filtered variant: only lists the teacher can rank
+                tt_np = b["targets"].numpy().reshape(b["m"], b["k"])
+                for mi in range(b["m"]):
+                    if tt_np[mi].std() > 0.05:
+                        r = within_cycle_rho(
+                            p.reshape(b["m"], b["k"])[mi], tt_np[mi], b["k"], 1)
+                        rhos_f += r
                 ps += p.tolist(); ts += b["targets"].numpy().tolist()
                 if seen < 8 * mc:
                     l0 = model.answer_logit(b["images"], b["questions"],
@@ -153,6 +160,9 @@ def main():
         model.model.train()
         return dict(bce=float(np.mean(bces)),
                     within_cycle_rho=float(np.mean(rhos)) if rhos else 0.0,
+                    within_cycle_rho_informative=(float(np.mean(rhos_f))
+                                                  if rhos_f else 0.0),
+                    rho_informative_n=len(rhos_f),
                     rho_n=len(rhos), mae=float(np.abs(ps - ts).mean()),
                     base_drift=bd)
 
