@@ -152,8 +152,11 @@ class CycleDataset(Dataset):
 
 def collate_cycles(batch):
     """Flatten M cycles x k proposals into one forward batch; keeps cycle
-    boundaries for the listwise term."""
+    boundaries. All files in a run must share one k (proposals per cycle) —
+    enforced here so mixed-k configs fail loudly instead of mis-reshaping."""
     k = batch[0]["trajs"].shape[0]
+    assert all(b["trajs"].shape[0] == k for b in batch), \
+        f"mixed k in batch: {[b['trajs'].shape[0] for b in batch]}"
     images, questions = [], []
     for b in batch:
         images += [b["image"]] * k
