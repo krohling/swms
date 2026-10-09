@@ -105,19 +105,29 @@ class CycleDataset(Dataset):
     siblings together; frame-conditional shortcuts contribute exactly zero
     to that term because everything but the trajectories is shared."""
 
-    def __init__(self, h5_paths, episodes, amin, amax):
+    def __init__(self, h5_paths, episodes, amin, amax, questions="planner"):
+        """questions: "planner" (approach+place from labels), "all" (also every
+        aux question stored in the file), or an explicit list of question
+        strings to include. Question texts come from file attrs — the trainer
+        stays agnostic to what the dataset contains."""
         self.paths = list(h5_paths)
         self.amin, self.amax = amin, amax
         self._files = None
-        self.index = []                      # (path_idx, ep, cycle, col, q)
+        self.index = []          # (path_idx, ep, cycle, source, col, q)
         for pi, ep in episodes:
             with h5py.File(self.paths[pi], "r") as f:
                 g = f[ep]
                 C = g["labels"].shape[0]
-                qs = {a: g.attrs[a] for a, _ in QUESTION_KEYS}
+                cand = [("labels", col, str(g.attrs[a]))
+                        for a, col in QUESTION_KEYS]
+                if questions != "planner" and "aux_labels" in g:
+                    for col, q in enumerate(g.attrs.get("aux_questions", [])):
+                        cand.append(("aux_labels", col, str(q)))
+                if isinstance(questions, (list, tuple)):
+                    cand = [c for c in cand if c[2] in set(questions)]
             for c in range(C):
-                for attr, col in QUESTION_KEYS:
-                    self.index.append((pi, ep, c, col, qs[attr]))
+                for src, col, q in cand:
+                    self.index.append((pi, ep, c, src, col, q))
 
     def _f(self, pi):
         if self._files is None:
@@ -130,11 +140,11 @@ class CycleDataset(Dataset):
         return len(self.index)
 
     def __getitem__(self, i):
-        pi, ep, c, col, q = self.index[i]
+        pi, ep, c, src, col, q = self.index[i]
         g = self._f(pi)[ep]
         img = Image.open(io.BytesIO(g["frames_t"][c].tobytes())).convert("RGB")
         trajs = normalize(g["trajs"][c].astype(np.float32), self.amin, self.amax)
-        targets = g["labels"][c, :, col].astype(np.float32)
+        targets = g[src][c, :, col].astype(np.float32)
         return dict(image=img, question=str(q),
                     trajs=torch.from_numpy(trajs),
                     targets=torch.from_numpy(targets))
