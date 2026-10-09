@@ -1,28 +1,30 @@
 """Run-4 trainer: cycle-batched POINTWISE BCE on branched (sibling) data.
 
-Derived from train_rank.py. lambda_rank defaults to 0 (pure pointwise):
-cycle-grouped batching alone routes trajectory-deviation gradient to the
-trajectory pathway (sibling frame-gradients cancel within an update), per the
-run-1..3 postmortems. Set lambda_rank > 0 to re-enable the floor-aware
-listwise escalation. Questions are enumerated from the dataset files
-(cfg "questions": planner | all | [explicit list]).
+Default loss is purely pointwise — per proposal i with student logit l_i and
+teacher prob p_i:
+  L = mean_i [ softplus(l_i) - p_i * l_i ]        (BCEWithLogits, soft target)
 
-Loss per (cycle, question) list of k proposals with student logits l_i and
-teacher probs p_i:
-  L_BCE  = mean_i [ softplus(l_i) - p_i * l_i ]            (calibration)
-  L_rank = KL( softmax(t/T) || softmax(l/T) ),  t_i = logit(clip(p_i))
-  L      = L_BCE + lambda_rank * L_rank
-A frame-only model gives identical l_i within a list -> uniform softmax ->
-L_rank gradient (1/k - P_i) discharges ONLY through the trajectory channel.
+What makes it different from run 1 is the BATCHING, not the loss: each batch
+element is one (cycle, question) list — the frame plus all k sibling
+proposals together. Within an update the siblings' shared-frame gradients
+sum to the cycle-mean error (trajectory-driven deviations cancel in the
+frame pathway) while each proposal's deviation still flows through its own
+trajectory tokens — variance-routing that nudges credit toward the
+trajectory channel without any auxiliary loss term.
 
-Differences from run 1 (train.py):
-  - batch unit = cycles (collate_cycles), micro_cycles * k proposal-forwards
-  - projector open-init (proj_init_scale, default 0.1)
-  - val logs within-cycle Spearman rho (the deployment metric) every pass
-Checkpoint/resume/clip/wandb identical to train.py.
+Escalation path (OFF by default): lambda_rank > 0 re-enables the run-2
+listwise KL over each list, KL(softmax(t/T) || softmax(l/T)) with
+t_i = logit(clip(p_i)). Use if val within-cycle rho flatlines at 0 with the
+run-1 shortcut signature (pooled Spearman up, rho pinned).
+
+Questions are enumerated from the dataset files themselves; cfg "questions"
+selects: "planner" | "all" | [explicit list of question strings].
+Other inherited pieces: projector open-init (proj_init_scale), native
+within-cycle Spearman rho at every val pass, drift probe, atomic resume
+states, wandb artifacts.
 
 Usage:
-  python swm-next/swm_lora/train_rank.py --config <yaml> [--resume auto]
+  python swm-next/swm_lora/train4.py --config swm-next/swm_lora/train4_hybrid.yaml
 """
 import argparse
 import glob
