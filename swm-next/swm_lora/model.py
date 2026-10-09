@@ -29,24 +29,38 @@ NO_VARIANTS = [" No", " no", "No", "no"]
 
 
 class TrajectoryProjector(nn.Module):
-    def __init__(self, action_dim, d_model, hidden=512, init_scale=0.0):
+    def __init__(self, action_dim, d_model, hidden=512, init_scale=0.0,
+                 cumsum=False):
         """init_scale=0 -> exact-base at step 0 (run-1 behavior; shown to let
         the frame-mean shortcut win while the gate stays shut). init_scale>0
         (run-2: 0.1) opens the trajectory channel from the start; LoRA B=0
-        still keeps the LM itself at base behavior at init."""
+        still keeps the LM itself at base behavior at init.
+
+        cumsum=True widens each step's input to [a_t, cumsum(a)_t / H]: the
+        running integral gives every token its displacement-so-far (and the
+        last token the net displacement), so end-state information — what the
+        teacher actually scores — is a readout instead of a 16-token
+        composition the LM must learn. /H keeps the new channels in the raw
+        actions' range."""
         super().__init__()
+        self.cumsum = cumsum
+        in_dim = action_dim * 2 if cumsum else action_dim
         self.net = nn.Sequential(
-            nn.Linear(action_dim, hidden), nn.GELU(), nn.Linear(hidden, d_model))
+            nn.Linear(in_dim, hidden), nn.GELU(), nn.Linear(hidden, d_model))
         self.scale = nn.Parameter(torch.tensor([float(init_scale)]))
 
     def forward(self, actions):                     # (B, H, A) -> (B, H, D)
+        if self.cumsum:
+            actions = torch.cat(
+                [actions, actions.cumsum(dim=-2) / actions.shape[-2]], dim=-1)
         return self.net(actions) * self.scale
 
 
 class QwenSWM(nn.Module):
     def __init__(self, model_id="Qwen/Qwen3-VL-8B-Instruct", action_dim=5,
                  horizon=16, lora_r=16, lora_alpha=32, lora_dropout=0.05,
-                 device="cuda", dtype=torch.bfloat16, proj_init_scale=0.0):
+                 device="cuda", dtype=torch.bfloat16, proj_init_scale=0.0,
+                 traj_cumsum=False):
         super().__init__()
         from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
         from peft import LoraConfig, get_peft_model
@@ -66,7 +80,8 @@ class QwenSWM(nn.Module):
 
         d_model = base.config.text_config.hidden_size
         self.projector = TrajectoryProjector(action_dim, d_model,
-                                             init_scale=proj_init_scale)
+                                             init_scale=proj_init_scale,
+                                             cumsum=traj_cumsum)
         # projector stays fp32 (stable AdamW on the zero-init scale);
         # the scatter hook casts its output to the model dtype.
         self.horizon = horizon

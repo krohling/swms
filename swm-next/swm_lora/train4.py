@@ -83,7 +83,8 @@ def main():
                     horizon=cfg["horizon"], lora_r=cfg["lora_r"],
                     lora_alpha=cfg["lora_alpha"],
                     lora_dropout=cfg.get("lora_dropout", 0.05), device=device,
-                    proj_init_scale=float(cfg.get("proj_init_scale", 0.1)))
+                    proj_init_scale=float(cfg.get("proj_init_scale", 0.1)),
+                    traj_cumsum=bool(cfg.get("traj_cumsum", False)))
     params = model.trainable_parameters()
     print(f"trainable {sum(p.numel() for p in params)/1e6:.1f}M | "
           f"total steps {total_steps} (eff {mc*accum} lists/step)", flush=True)

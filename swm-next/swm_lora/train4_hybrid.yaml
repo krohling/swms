@@ -16,6 +16,7 @@ epochs: 3
 micro_cycles: 2                # 2 cycles x k=8 = 16 proposal-forwards/micro
 accum_cycles: 6                # eff 12 lists = 96 proposals per opt step
 proj_init_scale: 0.1
+traj_cumsum: true     # per-step [a_t, cumsum/H] input (16x10)
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
