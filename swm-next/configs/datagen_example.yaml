@@ -26,8 +26,8 @@ questions:
 # Generation knobs are CLI flags:
 #   --episodes N --seed-start S --k K --frac-random F
 #   --exec-temp-max 2.0        (k=1 noisy-behavior capture)
-#   --min-sep 0.025            (diversity-enforcing rejection sampling;
-#                               calibrated: p5-p10 of pairwise distances)
+#   --min-sep 0.05              (diversity-enforcing rejection sampling;
+#                               teacher-JND calibrated, see generation.min_sep)
 #   --aux-labels               (use default shaped aux set when config has no aux)
 
 # Dataset-defining knobs (CLI flags override when passed explicitly):
@@ -35,5 +35,9 @@ generation:
   k: 8
   lookahead: 16
   frac_random: 0.5
-  min_sep: 0.025
+  min_sep: 0.05      # teacher-JND calibrated: noise floor |dp|~0.05; signal
+                     # exceeds ~70% of floor at this separation. Measured on
+                     # 163k within-cycle pairs (bg_k16 dataset). The same 0.05
+                     # (in p-units) is the tie margin for floor-aware ranking
+                     # losses. Recorded per cycle -> post-hoc filterable.
   # exec_temp_max: 2.0        # k=1 noisy-behavior capture only
