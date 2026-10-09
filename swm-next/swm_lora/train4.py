@@ -4,8 +4,6 @@ distillation on teacher p_yes).
 Loss: pointwise soft-target BCE per proposal — for student logit l_i and
 teacher prob p_i:
   L = mean_i [ softplus(l_i) - p_i * l_i ]        (BCEWithLogits, soft target)
-Optionally, lambda_rank > 0 adds a listwise KL over each cycle's proposals:
-  L_rank = KL( softmax(t/T) || softmax(l/T) ),  t_i = logit(clip(p_i)).
 
 Batching: each batch element is one (cycle, question) list — the frame plus
 all k sibling proposals forwarded together (micro_cycles lists per micro-step,
@@ -37,15 +35,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                   # noqa: E402
 from data import (CycleDataset, action_stats, collate_cycles,  # noqa: E402
                   episode_split, save_split)
-
-
-def rank_loss(logits, targets, k, m, T=1.0):
-    """Listwise KL over each cycle's k proposals. logits/targets: (m*k,)."""
-    l = logits.view(m, k) / T
-    t = torch.logit(targets.view(m, k).clamp(1e-4, 1 - 1e-4)) / T
-    return torch.nn.functional.kl_div(
-        torch.log_softmax(l, dim=1), torch.softmax(t, dim=1),
-        reduction="batchmean")
 
 
 def within_cycle_rho(p, t, k, m):
@@ -85,8 +74,6 @@ def main():
 
     mc = int(cfg["micro_cycles"])                 # cycles per micro-step
     accum = int(cfg["accum_cycles"])              # micro-steps per opt step
-    lam = float(cfg.get("lambda_rank", 0.0))
-    T = float(cfg.get("rank_temperature", 1.0))
     epochs = float(cfg.get("epochs", 4))
     steps_per_epoch = len(train_ds) // (mc * accum)
     total_steps = int(epochs * steps_per_epoch)
@@ -138,7 +125,7 @@ def main():
         model.model.eval()
         dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_cycles,
                         num_workers=2)
-        bces, kls, rhos, ps, ts = [], [], [], [], []
+        bces, rhos, ps, ts = [], [], [], []
         drift = []
         with torch.no_grad():
             seen = 0
@@ -148,7 +135,6 @@ def main():
                 l = model.answer_logit(b["images"], b["questions"], b["trajs"])
                 tt = b["targets"].to(l.device)
                 bces.append(float(model.loss(l, tt)))
-                kls.append(float(rank_loss(l, tt, b["k"], b["m"], T)))
                 p = torch.sigmoid(l).cpu().numpy()
                 rhos += within_cycle_rho(p, b["targets"].numpy(), b["k"], b["m"])
                 ps += p.tolist(); ts += b["targets"].numpy().tolist()
@@ -165,7 +151,7 @@ def main():
             bd = float(np.abs(base[:n] - np.array(drift[:n])).mean())
         ps, ts = np.array(ps), np.array(ts)
         model.model.train()
-        return dict(bce=float(np.mean(bces)), rank_kl=float(np.mean(kls)),
+        return dict(bce=float(np.mean(bces)),
                     within_cycle_rho=float(np.mean(rhos)) if rhos else 0.0,
                     rho_n=len(rhos), mae=float(np.abs(ps - ts).mean()),
                     base_drift=bd)
@@ -182,7 +168,7 @@ def main():
     it = iter(dl)
     while step < total_steps:
         opt.zero_grad(set_to_none=True)
-        acc_bce = acc_kl = 0.0
+        acc_bce = 0.0
         for _ in range(accum):
             try:
                 b = next(it)
@@ -191,15 +177,12 @@ def main():
             l = model.answer_logit(b["images"], b["questions"], b["trajs"])
             tt = b["targets"].to(l.device)
             bce = model.loss(l, tt)
-            kl = rank_loss(l, tt, b["k"], b["m"], T) if lam > 0 else None
-            loss = bce + lam * kl if kl is not None else bce
-            (loss / accum).backward()
+            (bce / accum).backward()
             acc_bce += float(bce) / accum
-            acc_kl += (float(kl) / accum) if kl is not None else 0.0
         gn = torch.nn.utils.clip_grad_norm_(params, clip)
         opt.step(); sched.step(); step += 1
         if step % 20 == 0:
-            run.log(dict(train_bce=acc_bce, train_rank_kl=acc_kl,
+            run.log(dict(train_bce=acc_bce,
                          grad_norm=float(gn), lr=sched.get_last_lr()[0],
                          proj_scale=float(model.projector.scale.detach())),
                     step=step)

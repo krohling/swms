@@ -14,8 +14,6 @@ val_frac: 0.05
 epochs: 3
 micro_cycles: 2                # 2 cycles x k=8 = 16 proposal-forwards/micro
 accum_cycles: 6                # eff 12 lists = 96 proposals per opt step
-lambda_rank: 0.0               # pointwise; listwise escalation if rho flatlines
-rank_temperature: 1.0
 proj_init_scale: 0.1
 learning_rate: 1.0e-4
 warmup_frac: 0.03
