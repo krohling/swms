@@ -6,13 +6,12 @@ horizon: 16
 lora_r: 16
 lora_alpha: 32
 lora_dropout: 0.05
-h5_paths: [datasets_swm/bg_hybrid_k8_s30000.h5, datasets_swm/bg_hybrid_k8_s31000.h5,
-           datasets_swm/bg_hybrid_k8_s32100.h5, datasets_swm/bg_hybrid_k8_s33200.h5,
-           datasets_swm/bg_hybrid_k8_s34300.h5]
+h5_paths: [datasets_swm/bg_hybrid_k8_s31000.h5, datasets_swm/bg_hybrid_k8_s32100.h5,
+           datasets_swm/bg_hybrid_k8_s33200.h5, datasets_swm/bg_hybrid_k8_s34300.h5]
 diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
 questions: planner             # trainer is file-driven; planner-only this run
 val_frac: 0.05
-epochs: 3
+epochs: 0.75           # pilot GO/NO-GO horizon
 micro_cycles: 2                # 2 cycles x k=8 = 16 proposal-forwards/micro
 accum_cycles: 6                # eff 12 lists = 96 proposals per opt step
 proj_init_scale: 0.1
@@ -26,5 +25,5 @@ resume_every: 500
 seed: 0
 device: cuda
 wandb_project: swm-lora
-run_name: run4-hybrid-k8-pointwise
-out_dir: outputs_swm_lora/run4_hybrid
+run_name: run4pilot-hybrid-k8
+out_dir: outputs_swm_lora/run4_pilot
