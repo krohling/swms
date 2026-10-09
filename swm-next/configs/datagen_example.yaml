@@ -1,0 +1,31 @@
+# Dataset-generation config (swm-next/verifier/datagen.py --config <this>).
+# Env/model section (same keys the verifier-MPC harness uses):
+env_type: ogbench            # informational; datagen builds OGB env via make_env
+device: mps                  # cuda on Vista
+seed_start: 6000             # overridden by --seed-start; 6000-6099 reserved for eval
+block_combo: [blue_cube, green_cube]
+diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+max_cycles: 50
+actions_per_cycle: 4
+arm_alpha: 0.1
+model_id: Qwen/Qwen3-VL-8B-Instruct
+batch: 8
+
+# Questions (all optional — omit the section to use the block_combo-derived
+# templates). approach/place/hold are the planner labels; aux is a freeform
+# list labeled per proposal end frame when present.
+questions:
+  approach: "Is the robot grasping the blue cube?"
+  place: "Is the blue cube on top of the green cube?"
+  # hold: defaults to approach
+  aux:
+    - "Is the gripper near the blue cube?"
+    - "Is the blue cube lifted off the table?"
+    - "Is the blue cube close to the green cube?"
+
+# Generation knobs are CLI flags:
+#   --episodes N --seed-start S --k K --frac-random F
+#   --exec-temp-max 2.0        (k=1 noisy-behavior capture)
+#   --min-sep 0.025            (diversity-enforcing rejection sampling;
+#                               calibrated: p5-p10 of pairwise distances)
+#   --aux-labels               (use default shaped aux set when config has no aux)

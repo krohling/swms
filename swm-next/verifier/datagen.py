@@ -71,9 +71,9 @@ def ask(judge, images, question, batch):
     return out
 
 
-def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
-                policy_name, k, temps, lookahead, batch, exec_temp_max=None,
-                aux_labels=False):
+def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
+                q_hold, aux_qs, seed, policy_name, k, temps, lookahead,
+                batch, exec_temp_max=None, min_sep=0.0):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
     rng = np.random.RandomState(seed)          # selection RNG (random policy)
@@ -85,14 +85,10 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
     policy.add_obs(frame)
 
     n_exec = cfg["actions_per_cycle"]
-    q_app, q_place, q_hold = (questions["grasp"], questions["ontop"],
-                              questions["grasp"])
-    aux_qs = ([questions[k] for k in
-               ("near", "above_cube", "touching", "lifted", "above_goal",
-                "close_goal")] if aux_labels else [])
+
     gate_ema = None
     rec = dict(frames_t=[], trajs=[], end_frames=[], labels=[], pick=[],
-               aux=[])
+               aux=[], min_sep=[])
     done = False
     cycle = -1
     exec_temps = []
@@ -102,8 +98,37 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
             # noisy-behavior capture (robot-compatible): the executed chunk is
             # sampled at a fresh uniform temperatureevery cycle
             temps = [float(temp_rng.uniform(0.0, exec_temp_max))]
-        exec_temps.append(list(temps))
-        candidates = np.asarray(policy.sample_trajs(k, temperatures=temps))
+        cyc_temps = list(temps)
+        candidates = np.asarray(policy.sample_trajs(k, temperatures=cyc_temps))
+        if min_sep > 0 and k > 1:
+            # diversity-enforcing rejection: resample near-duplicate proposals
+            # (mean per-step L2 in raw action units) BEFORE paying for their
+            # rollout + labels. Duplicates come from the near-deterministic
+            # low end of the ladder, so rejected slots are resampled at an
+            # ESCALATED temperature (fresh U(0.3, 2.0) draw) — resampling at
+            # the original temp would reproduce the duplicate forever.
+            for retry in range(4):
+                keep = np.ones(k, dtype=bool)
+                for i in range(1, k):
+                    prev = candidates[:i][keep[:i]]
+                    d = np.sqrt(((prev - candidates[i]) ** 2).sum(-1)).mean(-1)
+                    if float(d.min()) < min_sep:
+                        keep[i] = False
+                bad = np.where(~keep)[0]
+                if len(bad) == 0:
+                    break
+                for j in bad:
+                    cyc_temps[j] = float(temp_rng.uniform(0.3, 2.0))
+                torch.manual_seed(hash((seed, cycle, "resep", retry)) % 2**31)
+                res = np.asarray(policy.sample_trajs(
+                    len(bad), temperatures=[cyc_temps[j] for j in bad]))
+                candidates[bad] = res
+        exec_temps.append(cyc_temps)
+        if k > 1:
+            dd = np.sqrt(((candidates[:, None] - candidates[None, :]) ** 2
+                          ).sum(-1)).mean(-1)
+            np.fill_diagonal(dd, np.inf)
+            rec["min_sep"].append(float(dd.min()))
 
         frame_t = np.asarray(frame, dtype=np.uint8)
         saved = env.get_state()
@@ -127,7 +152,7 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
                 axis=-1).astype(np.float32))        # (k, Q)
 
         if policy_name == "verifier":
-            rg = float(judge.p_yes([frame_t], [questions["grasp"]])[0][0])
+            rg = float(judge.p_yes([frame_t], [q_hold])[0][0])
             gate_ema = rg if gate_ema is None else \
                 GATE_ALPHA * rg + (1 - GATE_ALPHA) * gate_ema
             g = gate_ema
@@ -169,6 +194,9 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, questions, seed,
     if rec["aux"]:
         grp.create_dataset("aux_labels", data=np.stack(rec["aux"]))
         grp.attrs["aux_questions"] = [q.encode() for q in aux_qs]
+    if rec["min_sep"]:
+        grp.create_dataset("min_sep", data=np.asarray(rec["min_sep"],
+                                                      dtype=np.float32))
     grp.attrs.update(dict(
         seed=seed, policy=policy_name, success=bool(done),
         cycles=cycle + 1,
@@ -186,6 +214,11 @@ def main():
     ap.add_argument("--lookahead", type=int, default=16)
     ap.add_argument("--frac-random", type=float, default=0.3,
                     help="fraction of episodes advanced by random selection")
+    ap.add_argument("--min-sep", type=float, default=0.0, dest="min_sep",
+                    help="diversity-enforcing rejection sampling: resample "
+                         "proposals closer than this (mean per-step L2, raw "
+                         "action units; calibrated default suggestion 0.025; "
+                         "0 disables)")
     ap.add_argument("--aux-labels", action="store_true",
                     help="also teacher-label the 6 shaped auxiliary questions "
                          "(near/above/touching/lifted/above_goal/close_goal) "
@@ -209,7 +242,20 @@ def main():
     env = make_env(cfg)
     goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
                             {"block_combo": cfg["block_combo"]})
-    questions = build_questions(cfg)
+    # questions: config section wins; build_questions templates as fallback.
+    # cfg["questions"] = {approach, place, hold (optional), aux: [freeform...]}
+    tmpl = build_questions(cfg)
+    qcfg = cfg.get("questions") or {}
+    q_app = qcfg.get("approach", tmpl["grasp"])
+    q_place = qcfg.get("place", tmpl["ontop"])
+    q_hold = qcfg.get("hold", q_app)
+    if "aux" in qcfg:
+        aux_qs = list(qcfg["aux"])
+    elif args.aux_labels:
+        aux_qs = [tmpl[k] for k in ("near", "above_cube", "touching",
+                                    "lifted", "above_goal", "close_goal")]
+    else:
+        aux_qs = []
 
     # interleave policies deterministically: every round(1/frac)-th is random
     n_rand = int(round(args.episodes * args.frac_random))
@@ -230,9 +276,10 @@ def main():
                 print(f"[{i+1}/{args.episodes}] ep_{seed} exists, skip", flush=True)
                 continue
             success, cycles = run_episode(
-                h5, env, goal, judge, cfg["diffusion_path"], cfg, questions,
-                seed, flags[i], args.k, temps, args.lookahead, batch,
-                exec_temp_max=args.exec_temp_max, aux_labels=args.aux_labels)
+                h5, env, goal, judge, cfg["diffusion_path"], cfg, q_app,
+                q_place, q_hold, aux_qs, seed, flags[i], args.k, temps,
+                args.lookahead, batch, exec_temp_max=args.exec_temp_max,
+                min_sep=args.min_sep)
             wins += success
             print(f"[{i+1}/{args.episodes}] seed {seed} ({flags[i]}): "
                   f"{'success' if success else 'fail'} @ {cycles} "
