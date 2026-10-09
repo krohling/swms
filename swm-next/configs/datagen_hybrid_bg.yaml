@@ -2,7 +2,7 @@
 # diversity enforcement, 50/50 verifier/random selection for deep+wide state
 # coverage, planner questions only (aux addable post-hoc from stored end
 # frames via a pure judge pass if the aux ablation warrants it).
-device: cuda                   # mps locally
+device: mps                    # Vista sbatch sed-overrides to cuda
 seed_start: 30000              # fresh range; 6000-6099 eval / 10000-22799 used
 block_combo: [blue_cube, green_cube]
 diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
@@ -15,6 +15,6 @@ batch: 8
 generation:
   k: 8
   lookahead: 16
-  frac_random: 0.5             # 50% verifier-selected (deep task manifold) /
-                               # 50% random-selected (wide failure coverage)
+  frac_random: 0.5             # 50% verifier-selected
+                               # 50% random-selected
   min_sep: 0.05                # teacher-JND calibrated (|dp| floor ~0.05)
