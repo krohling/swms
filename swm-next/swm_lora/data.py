@@ -215,3 +215,34 @@ class ExecutedChunkDataset(Dataset):
                 t = np.float32(t > 0.5)
         return dict(image=img, question=q, traj=torch.from_numpy(traj),
                     target=torch.tensor(t))
+
+
+class SelectionCycleDataset(CycleDataset):
+    """CycleDataset with per-sample candidate permutation — the h5 stores
+    candidates in temperature-ladder order, so without shuffling position
+    carries label signal (slot 0 is always the greedy sample). Training draws
+    a fresh permutation each access; validation uses a fixed per-index
+    permutation so metrics are deterministic."""
+
+    def __init__(self, *a, fixed_perm=False, **kw):
+        super().__init__(*a, **kw)
+        self.fixed_perm = fixed_perm
+
+    def __getitem__(self, i):
+        s = super().__getitem__(i)
+        k = s["trajs"].shape[0]
+        rng = np.random.RandomState(i) if self.fixed_perm else np.random
+        perm = torch.from_numpy(np.ascontiguousarray(rng.permutation(k)))
+        return dict(image=s["image"], question=s["question"],
+                    trajs=s["trajs"][perm], targets=s["targets"][perm])
+
+
+def collate_selection(batch):
+    """M lists -> one forward: images/questions len M, trajs (M,k,H,A),
+    targets (M,k)."""
+    k = batch[0]["trajs"].shape[0]
+    assert all(b["trajs"].shape[0] == k for b in batch), "mixed k in batch"
+    return dict(images=[b["image"] for b in batch],
+                questions=[b["question"] for b in batch], k=k, m=len(batch),
+                trajs=torch.stack([b["trajs"] for b in batch]),
+                targets=torch.stack([b["targets"] for b in batch]))

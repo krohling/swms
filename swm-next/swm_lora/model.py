@@ -181,3 +181,77 @@ class QwenSWM(nn.Module):
         set_peft_model_state_dict(self.model, st.load_file(f))
         self.projector.load_state_dict(
             torch.load(f"{path}/projector.pt", map_location=self.device))
+
+
+class QwenSWMSelector(QwenSWM):
+    """Selection variant: ONE forward sees the frame plus ALL k candidate
+    trajectories (k blocks of `horizon` placeholder tokens), and the readout is
+    a k-way distribution over the digit tokens "1".."k" at the final position.
+    Attention can compare candidates directly — relative judgment instead of k
+    independent absolute scores. Same projector (shared across candidates) and
+    LoRA recipe as QwenSWM; checkpoints are interchangeable in format.
+
+    k <= 9 (single-digit answer tokens)."""
+
+    def __init__(self, k=8, **kw):
+        super().__init__(**kw)
+        assert 1 < k <= 9, "selection head uses single-digit answer tokens"
+        self.k = k
+        tok = self.processor.tokenizer
+
+        def singles(cands):
+            return [tok(c, add_special_tokens=False).input_ids[0]
+                    for c in cands
+                    if len(tok(c, add_special_tokens=False).input_ids) == 1]
+        self.digit_ids = []
+        for i in range(k):
+            ids = singles([f" {i+1}", f"{i+1}"])
+            assert ids, f"no single-token encoding for candidate index {i+1}"
+            self.digit_ids.append(ids)
+
+    def build_inputs(self, images, questions):
+        texts = []
+        blocks = "".join(
+            f" Trajectory {i+1}: " + TRAJ_PLACEHOLDER * self.horizon
+            for i in range(self.k))
+        for q in questions:
+            content = [{"type": "image"},
+                       {"type": "text",
+                        "text": f"Here are {self.k} candidate trajectories."
+                                f"{blocks} Which trajectory best achieves"
+                                f" this goal: {q} Answer with a single number"
+                                f" from 1 to {self.k}."}]
+            msgs = [{"role": "user", "content": content}]
+            texts.append(self.processor.apply_chat_template(
+                msgs, add_generation_prompt=True, tokenize=False))
+        return self.processor(text=texts, images=[[im] for im in images],
+                              return_tensors="pt", padding=True)
+
+    def selection_logits(self, images, questions, trajs):
+        """trajs: (B, k, H, A) normalized -> (B, k) digit logits (LSE over
+        token variants per candidate index)."""
+        B, k, H, A = trajs.shape
+        assert k == self.k
+        inputs = self.build_inputs(images, questions).to(self.device)
+        te = self.projector(trajs.to(self.device, dtype=torch.float32)
+                            .reshape(B * k, H, A)).reshape(B, k * H, -1)
+        self._pending = (inputs["input_ids"], te)
+        try:
+            out = self.model(**inputs)
+        finally:
+            self._pending = None
+        mask = inputs["attention_mask"]
+        last = mask.sum(dim=1) - 1
+        idx = torch.arange(out.logits.shape[0], device=out.logits.device)
+        z = out.logits[idx, last, :].float()
+        return torch.stack(
+            [torch.logsumexp(z[:, ids], dim=-1) for ids in self.digit_ids],
+            dim=-1)                                        # (B, k)
+
+    @staticmethod
+    def selection_loss(z, teacher_p, tau=0.1):
+        """Soft cross-entropy toward the teacher's softmax over candidates.
+        tau ~ 2x the teacher JND (|dp| ~ 0.05): near-ties -> near-uniform
+        target (no penalty for picking either), clear winners -> sharp."""
+        t = torch.softmax(teacher_p / tau, dim=-1)
+        return -(t * torch.log_softmax(z, dim=-1)).sum(-1).mean()

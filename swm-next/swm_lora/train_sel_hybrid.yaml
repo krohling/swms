@@ -1,0 +1,33 @@
+# Run 5 (selection arm): all-k-in-context selection, soft CE over digit tokens.
+# Same hybrid k=8 data as run4; candidates shuffled per sample.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+k: 8
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+h5_paths: [datasets_swm/bg_hybrid_k8_s30000.h5, datasets_swm/bg_hybrid_k8_s31000.h5,
+           datasets_swm/bg_hybrid_k8_s32100.h5, datasets_swm/bg_hybrid_k8_s33200.h5,
+           datasets_swm/bg_hybrid_k8_s34300.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_lists: 4                 # 4 lists/forward (1 image + 128 traj tokens each)
+accum_lists: 4                 # eff 16 lists per opt step
+tau: 0.1                       # target softmax temp ~ 2x teacher JND
+proj_init_scale: 0.1
+traj_cumsum: true
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: run5-selection-k8
+out_dir: outputs_swm_lora/run5_selection
