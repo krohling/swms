@@ -14,5 +14,5 @@ cd $W
 export HF_HOME=$WORK/hf_cache PYTHONPATH=$W:$W/swm-next PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 source $WORK/swm-followup/.wandb_env
-$V/bin/python swm-next/swm_lora/train_sel.py --config swm-next/swm_lora/train_sel_hybrid.yaml --resume auto
+$V/bin/python swm-next/swm_lora/train_sel.py --config swm-next/swm_lora/train_sel_hybrid.yaml --resume auto || { echo TRAIN_JOB_FAILED; exit 1; }
 echo TRAIN_JOB_DONE
