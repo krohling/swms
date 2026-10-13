@@ -209,6 +209,14 @@ class QwenSWMSelector(QwenSWM):
             assert ids, f"no single-token encoding for candidate index {i+1}"
             self.digit_ids.append(ids)
 
+        # learned candidate-index embedding, added to every token of block i
+        # (binds block identity into content; zero-init so a warm start from a
+        # scoring-arm checkpoint is exactly preserved at step 0). fp32 like
+        # the projector; the scatter hook casts to model dtype.
+        d_model = self.model.config.text_config.hidden_size
+        self.cand_embed = nn.Parameter(
+            torch.zeros(k, d_model, device=self.device))
+
     def build_inputs(self, images, questions):
         texts = []
         blocks = "".join(
@@ -234,7 +242,8 @@ class QwenSWMSelector(QwenSWM):
         assert k == self.k
         inputs = self.build_inputs(images, questions).to(self.device)
         te = self.projector(trajs.to(self.device, dtype=torch.float32)
-                            .reshape(B * k, H, A)).reshape(B, k * H, -1)
+                            .reshape(B * k, H, A)).reshape(B, k, H, -1)
+        te = (te + self.cand_embed[None, :, None, :]).reshape(B, k * H, -1)
         self._pending = (inputs["input_ids"], te)
         try:
             out = self.model(**inputs)
@@ -255,3 +264,20 @@ class QwenSWMSelector(QwenSWM):
         target (no penalty for picking either), clear winners -> sharp."""
         t = torch.softmax(teacher_p / tau, dim=-1)
         return -(t * torch.log_softmax(z, dim=-1)).sum(-1).mean()
+
+    def trainable_parameters(self):
+        return super().trainable_parameters() + [self.cand_embed]
+
+    def save_adapters(self, path):
+        super().save_adapters(path)
+        torch.save({"cand_embed": self.cand_embed.detach().cpu()},
+                   f"{path}/selector_extra.pt")
+
+    def load_adapters(self, path):
+        import os
+        super().load_adapters(path)
+        f = f"{path}/selector_extra.pt"
+        if os.path.exists(f):                      # absent in scoring-arm
+            st = torch.load(f, map_location=self.device)  # ckpts (warm start)
+            with torch.no_grad():
+                self.cand_embed.copy_(st["cand_embed"])
