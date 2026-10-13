@@ -28,6 +28,7 @@ ckpt_every: 1000
 resume_every: 500
 seed: 0
 device: cuda
+init_adapters: ../swms-datagen/outputs_swm_lora/run4_hybrid/ckpt_step84000   # run4 final (warm start)
 wandb_project: swm-lora
-run_name: run5-selection-k8
-out_dir: outputs_swm_lora/run5_selection
+run_name: run5b-selection-warmstart
+out_dir: outputs_swm_lora/run5b_selection

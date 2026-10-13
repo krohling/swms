@@ -86,6 +86,13 @@ def main():
     sched = LambdaLR(opt, lr_fn)
 
     step0 = 0
+    # warm start (fresh runs only; a resume state overrides it below): load
+    # LoRA+projector from a scoring-arm checkpoint so trajectory-outcome
+    # structure pre-exists and the digit readout only learns the argmax wiring
+    # (cold selection-CE starts collapse into the uniform saddle — run5 leg 1)
+    if cfg.get("init_adapters"):
+        model.load_adapters(cfg["init_adapters"])
+        print(f"warm-started from {cfg['init_adapters']}", flush=True)
     if args.resume == "auto":
         for p in reversed(sorted(glob.glob(f"{out}/resume_step*.pt"),
                 key=lambda q: int(q.split("step")[-1].split(".")[0]))):
