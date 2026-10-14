@@ -14,8 +14,10 @@ parity — none of the judge's +17pp selection lift transfers.
   projector with **cumsum channels** ([a_t, cumsum/H] → 16×10 input, new this
   run), open-gate init 0.1.
 - Loss: pointwise soft-BCE on teacher p_yes; cycle-grouped batching
-  (12 lists/step eff). 3 epochs = 84,100 steps; trained to 84,000 (leg A
-  TIMEOUT 100 steps short; functionally final). ~1,740 steps/h on GH200.
+  (12 lists/step eff). 3 epochs = 84,687 steps, fully trained (leg A TIMEOUT
+  at 84,000; leg B finished the tail — TRAIN_DONE 2026-10-13). The "84k" eval
+  checkpoint is 687 steps before the true final; rho was flat across the gap
+  (0.303 @ 84.5k). ~1,740 steps/h on GH200.
 - wandb: `kevin_ai/swm-lora/run4-hybrid-k8-pointwise`.
 
 ## Offline metrics (val, 160 informative lists)
