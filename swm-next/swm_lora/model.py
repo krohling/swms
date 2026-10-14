@@ -217,7 +217,7 @@ class QwenSWMSelector(QwenSWM):
         self.cand_embed = nn.Parameter(
             torch.zeros(k, d_model, device=self.device))
 
-    def build_inputs(self, images, questions):
+    def build_selection_inputs(self, images, questions):
         texts = []
         blocks = "".join(
             f" Trajectory {i+1}: " + TRAJ_PLACEHOLDER * self.horizon
@@ -240,7 +240,7 @@ class QwenSWMSelector(QwenSWM):
         token variants per candidate index)."""
         B, k, H, A = trajs.shape
         assert k == self.k
-        inputs = self.build_inputs(images, questions).to(self.device)
+        inputs = self.build_selection_inputs(images, questions).to(self.device)
         te = self.projector(trajs.to(self.device, dtype=torch.float32)
                             .reshape(B * k, H, A)).reshape(B, k, H, -1)
         te = (te + self.cand_embed[None, :, None, :]).reshape(B, k * H, -1)
