@@ -68,7 +68,8 @@ marginal best-index distribution is uniform, and the loss has no pointwise
 anchor to bootstrap trajectory-differentiation — gradients flow only through
 the (quiet, scale≈0.1) trajectory tokens. Candidate fix: warm-start from the
 run-4 84k adapters so trajectory-outcome structure pre-exists and the digit
-readout only learns the argmax wiring. Decision pending.
+readout only learns the argmax wiring. Executed as run5b — same closed-loop
+verdict (aggregate flat at 47.3–48.0); see `experiments/run5b/REPORT.md`.
 
 ## Artifacts
 
