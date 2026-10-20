@@ -6,7 +6,7 @@
 #SBATCH -t 24:00:00
 #SBATCH -o %x-%j.out
 # Experiment 1 stage 1: encoder warm-up (projector only, no LoRA, fixed LR).
-# Runs from the swms-exp1 checkout (branch exp1-allinear-warmup).
+# Runs from the swms-exp1 checkout (branch add-linear-and-warmup).
 set -x
 W=$WORK/swm-followup/swms-exp1
 V=$WORK/swm-followup/swms-lt/.venv
