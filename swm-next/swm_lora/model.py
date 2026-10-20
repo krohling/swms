@@ -45,8 +45,11 @@ class TrajectoryProjector(nn.Module):
         super().__init__()
         self.cumsum = cumsum
         in_dim = action_dim * 2 if cumsum else action_dim
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden), nn.GELU(), nn.Linear(hidden, d_model))
+        if hidden is None:                       # single-linear variant
+            self.net = nn.Linear(in_dim, d_model)
+        else:
+            self.net = nn.Sequential(
+                nn.Linear(in_dim, hidden), nn.GELU(), nn.Linear(hidden, d_model))
         self.scale = nn.Parameter(torch.tensor([float(init_scale)]))
 
     def forward(self, actions):                     # (B, H, A) -> (B, H, D)
@@ -56,14 +59,23 @@ class TrajectoryProjector(nn.Module):
         return self.net(actions) * self.scale
 
 
+ATTN_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj"]
+MLP_TARGETS = ["gate_proj", "up_proj", "down_proj"]
+
+
 class QwenSWM(nn.Module):
     def __init__(self, model_id="Qwen/Qwen3-VL-8B-Instruct", action_dim=5,
                  horizon=16, lora_r=16, lora_alpha=32, lora_dropout=0.05,
                  device="cuda", dtype=torch.bfloat16, proj_init_scale=0.0,
-                 traj_cumsum=False):
+                 traj_cumsum=False, lora_targets="attention", apply_lora=True,
+                 proj_hidden=512):
+        """lora_targets: "attention" (q/k/v/o, the run1-4 recipe) or
+        "all-linear" (+ the transformer MLPs gate/up/down).
+        apply_lora=False builds NO adapters: the LM is exactly base Qwen and
+        only the trajectory projector trains (encoder warm-up stage).
+        proj_hidden: projector MLP width; None = single Linear(in, d_model)."""
         super().__init__()
         from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
-        from peft import LoraConfig, get_peft_model
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         tok = self.processor.tokenizer
@@ -72,14 +84,22 @@ class QwenSWM(nn.Module):
         for p in base.parameters():
             p.requires_grad = False
 
-        lcfg = LoraConfig(r=lora_r, lora_alpha=lora_alpha,
-                          lora_dropout=lora_dropout, bias="none",
-                          target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-                          exclude_modules=r".*visual.*")
-        self.model = get_peft_model(base, lcfg)
+        if apply_lora:
+            from peft import LoraConfig, get_peft_model
+            targets = dict(attention=ATTN_TARGETS,
+                           **{"all-linear": ATTN_TARGETS + MLP_TARGETS})[lora_targets]
+            lcfg = LoraConfig(r=lora_r, lora_alpha=lora_alpha,
+                              lora_dropout=lora_dropout, bias="none",
+                              target_modules=targets,
+                              exclude_modules=r".*visual.*")
+            self.model = get_peft_model(base, lcfg)
+        else:
+            self.model = base
+        self.has_lora = apply_lora
 
         d_model = base.config.text_config.hidden_size
         self.projector = TrajectoryProjector(action_dim, d_model,
+                                             hidden=proj_hidden,
                                              init_scale=proj_init_scale,
                                              cumsum=traj_cumsum)
         # projector stays fp32 (stable AdamW on the zero-init scale);
@@ -170,14 +190,16 @@ class QwenSWM(nn.Module):
     def save_adapters(self, path):
         import os
         os.makedirs(path, exist_ok=True)
-        self.model.save_pretrained(path)                   # LoRA only
+        if self.has_lora:
+            self.model.save_pretrained(path)               # LoRA only
         torch.save(self.projector.state_dict(), f"{path}/projector.pt")
 
     def load_adapters(self, path):
-        from peft import set_peft_model_state_dict
-        import safetensors.torch as st
         import os
         f = f"{path}/adapter_model.safetensors"
-        set_peft_model_state_dict(self.model, st.load_file(f))
+        if self.has_lora and os.path.exists(f):
+            from peft import set_peft_model_state_dict
+            import safetensors.torch as st
+            set_peft_model_state_dict(self.model, st.load_file(f))
         self.projector.load_state_dict(
             torch.load(f"{path}/projector.pt", map_location=self.device))

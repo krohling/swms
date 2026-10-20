@@ -1,0 +1,34 @@
+# Experiment 1: run4 recipe + all-linear LoRA + warm-started encoder.
+# Data and labels identical to run4 (no noise filtering — kept single-variable).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_hybrid_k8_s30000.h5, datasets_swm/bg_hybrid_k8_s31000.h5,
+           datasets_swm/bg_hybrid_k8_s32100.h5, datasets_swm/bg_hybrid_k8_s33200.h5,
+           datasets_swm/bg_hybrid_k8_s34300.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 lists/step, same geometry as run4
+proj_init_scale: 0.1
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/exp1_warmup/ckpt_stepTBD   # set after warm-up plateau
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp1-allinear-warmstart
+out_dir: outputs_swm_lora/exp1_full
