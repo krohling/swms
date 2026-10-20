@@ -26,7 +26,16 @@ Output: one HDF5 per run, episodes as groups:
   ep_<seed>/trajs      (C,k,H,A) f32
   ep_<seed>/end_frames (C,k)  vlen uint8 (JPEG)
   ep_<seed>/labels     (C,k,3) f32   [p_approach, p_place, p_hold]
-  ep_<seed>/pick       (C,)   i8
+  ep_<seed>/pick       (C,)   i8     executed candidate (policy-dependent)
+  -- v2 additions (planner-aligned training + replay support) --
+  ep_<seed>/gate_raw   (C,)   f32    judge p_yes(frame_t, q_hold), pre-EMA
+  ep_<seed>/gate       (C,)   f32    EMA(gate_raw, alpha) actually used in blending
+  ep_<seed>/score      (C,k)  f32    (1-g)*p_app + g*(PLACE_W*p_place + HOLD_W*p_hold)
+  ep_<seed>/planner_pick (C,) i8     argmax(score) — the verifier's (counterfactual)
+                                     choice, defined for random episodes too
+  ep_<seed>/spread_approach/place/blended (C,) f32   std over the k candidates
+  ep_<seed>/state_t_qpos/qvel     (C,42)/(C,38)   f64 sim state at frame_t
+  ep_<seed>/end_qpos/qvel       (C,k,42)/(C,k,38) f64 sim state at rollout ends
   attrs: seed, policy, success, cycles, questions, temps, k, lookahead
 
 Usage:
@@ -88,7 +97,8 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
 
     gate_ema = None
     rec = dict(frames_t=[], trajs=[], end_frames=[], labels=[], pick=[],
-               aux=[], min_sep=[])
+               aux=[], min_sep=[], gate_raw=[], gate=[], score=[],
+               planner_pick=[], state_t=[], end_states=[])
     done = False
     cycle = -1
     exec_temps = []
@@ -132,13 +142,18 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
 
         frame_t = np.asarray(frame, dtype=np.uint8)
         saved = env.get_state()
+        rec["state_t"].append({k2: np.array(v) for k2, v in saved.items()})
         end_frames = []
+        cyc_end_states = []
         for c in candidates:
             env.set_state(saved)
             f = frame
             for a in c[:lookahead]:
                 f = env.step(np.asarray(a))
             end_frames.append(np.asarray(f, dtype=np.uint8))
+            est = env.get_state()
+            cyc_end_states.append({k2: np.array(v) for k2, v in est.items()})
+        rec["end_states"].append(cyc_end_states)
         env.set_state(saved)
 
         # teacher labels for every proposal (hold == approach question by
@@ -151,15 +166,19 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
                 [ask(judge, end_frames, q, batch) for q in aux_qs],
                 axis=-1).astype(np.float32))        # (k, Q)
 
-        if policy_name == "verifier":
-            rg = float(judge.p_yes([frame_t], [q_hold])[0][0])
-            gate_ema = rg if gate_ema is None else \
-                GATE_ALPHA * rg + (1 - GATE_ALPHA) * gate_ema
-            g = gate_ema
-            scores = (1.0 - g) * p_app + g * (PLACE_W * p_place + HOLD_W * p_hold)
-            pick = int(np.argmax(scores))
-        else:
-            pick = int(rng.randint(k))
+        # gate + blended score are computed for EVERY episode (both policies):
+        # they are training targets now, not just the verifier's selection rule
+        rg = float(judge.p_yes([frame_t], [q_hold])[0][0])
+        gate_ema = rg if gate_ema is None else \
+            GATE_ALPHA * rg + (1 - GATE_ALPHA) * gate_ema
+        g = gate_ema
+        scores = (1.0 - g) * p_app + g * (PLACE_W * p_place + HOLD_W * p_hold)
+        planner_pick = int(np.argmax(scores))
+        pick = planner_pick if policy_name == "verifier" else int(rng.randint(k))
+        rec["gate_raw"].append(rg)
+        rec["gate"].append(g)
+        rec["score"].append(scores.astype(np.float32))
+        rec["planner_pick"].append(planner_pick)
 
         rec["frames_t"].append(jpeg(frame_t))
         rec["trajs"].append(np.asarray(candidates, dtype=np.float32))
@@ -190,6 +209,21 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
             e[i, j] = v
     grp.create_dataset("labels", data=np.stack(rec["labels"]))
     grp.create_dataset("pick", data=np.asarray(rec["pick"], dtype=np.int8))
+    grp.create_dataset("gate_raw", data=np.asarray(rec["gate_raw"], np.float32))
+    grp.create_dataset("gate", data=np.asarray(rec["gate"], np.float32))
+    grp.create_dataset("score", data=np.stack(rec["score"]))
+    grp.create_dataset("planner_pick",
+                       data=np.asarray(rec["planner_pick"], dtype=np.int8))
+    lab = np.stack(rec["labels"])                    # (C, k, 3)
+    grp.create_dataset("spread_approach", data=lab[:, :, 0].std(axis=1))
+    grp.create_dataset("spread_place", data=lab[:, :, 1].std(axis=1))
+    grp.create_dataset("spread_blended",
+                       data=np.stack(rec["score"]).std(axis=1))
+    for key in ("qpos", "qvel"):
+        grp.create_dataset(f"state_t_{key}",
+                           data=np.stack([st[key] for st in rec["state_t"]]))
+        grp.create_dataset(f"end_{key}", data=np.stack(
+            [[es[key] for es in row] for row in rec["end_states"]]))
     grp.create_dataset("exec_temps", data=np.asarray(exec_temps, dtype=np.float32))
     if rec["aux"]:
         grp.create_dataset("aux_labels", data=np.stack(rec["aux"]))
@@ -294,8 +328,10 @@ def main():
             min_sep=args.min_sep,
             **({"exec_temp_max": args.exec_temp_max}
                if args.exec_temp_max is not None else {}),
+            schema_version=2,
             recipe=_json.dumps(dict(
                 config=cfg, k=args.k, lookahead=args.lookahead,
+                gate_alpha=GATE_ALPHA, place_w=PLACE_W, hold_w=HOLD_W,
                 frac_random=args.frac_random, min_sep=args.min_sep,
                 exec_temp_max=args.exec_temp_max,
                 q_approach=q_app, q_place=q_place, q_hold=q_hold,
