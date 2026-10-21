@@ -19,7 +19,9 @@ accum_cycles: 6                # eff 12 lists/step, same geometry as run4
 proj_init_scale: 0.1
 proj_hidden: 512
 traj_cumsum: true
-init_projector: outputs_swm_lora/exp1_warmup/ckpt_stepTBD   # set after warm-up plateau
+init_projector: outputs_swm_lora/exp1_warmup_larg/ckpt_step1500   # warm-up plateau
+                 # (val BCE min 0.567; rho_inf 0.095 ~ peak 0.099; train/val gap
+                 #  opens past here -> projector-only overfit)
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
