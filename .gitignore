@@ -176,3 +176,13 @@ docs/
 
 # local verifier-MPC outputs
 outputs_verifier_mpc/
+
+# Datasets & local run artifacts (large; never committed)
+datasets_swm/
+outputs_swm_lora/
+outputs_swm_lora_local/
+outputs_base/
+outputs_random/
+outputs_multitask*/
+outputs_verifier_mpc*/
+.DS_Store
