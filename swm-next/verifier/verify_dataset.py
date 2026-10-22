@@ -13,8 +13,16 @@ Verifies, per episode:
 Exits nonzero on the first violated invariant. Prints a summary (episodes by
 policy, cycles, tie-list fraction at the JND) on success.
 
+For a consolidated pair from consolidate_v2.py, pass the kept file plus
+--removed <companion>: the gate-EMA invariant only holds on the full cycle
+sequence, so the pair is merged by orig_cycle_idx and checked that (a) the
+two sides partition every episode exactly, (b) the merged gate matches the
+EMA recurrence, and (c) each cycle sits on the side the R10 rule dictates.
+
 Usage:
   python swm-next/verifier/verify_dataset.py datasets_swm/bg_hybrid_v2_k8_*.h5
+  python swm-next/verifier/verify_dataset.py bg_hybrid_v2_k8_r10.h5 \
+      --removed bg_hybrid_v2_k8_r10_removed.h5
 """
 import argparse
 import json
@@ -26,10 +34,12 @@ import numpy as np
 EVAL_SEEDS = range(6000, 6100)
 
 
-def verify_file(path, jnd=0.05):
+def verify_file(path, jnd=0.05, ema_check=True):
     f = h5py.File(path, "r")
     assert f.attrs.get("schema_version") == 2, \
         f"{path}: schema_version != 2 (v1 files predate stored gate/score)"
+    assert not (ema_check and "filter" in f.attrs), \
+        f"{path}: cycle-filtered file — verify the pair with --removed"
     recipe = json.loads(f.attrs["recipe"])
     alpha = recipe["gate_alpha"]
     pw, hw = recipe["place_w"], recipe["hold_w"]
@@ -56,11 +66,14 @@ def verify_file(path, jnd=0.05):
             gate[:, None] * (pw * lab[:, :, 1] + hw * lab[:, :, 2])
         assert np.allclose(want, score, atol=1e-5), f"{ep}: score != blend"
 
-        ema, rec = None, []
-        for rg in g["gate_raw"][:]:
-            ema = float(rg) if ema is None else alpha * float(rg) + (1 - alpha) * ema
-            rec.append(ema)
-        assert np.allclose(rec, gate, atol=1e-6), f"{ep}: gate != EMA(gate_raw)"
+        if ema_check:
+            ema, rec = None, []
+            for rg in g["gate_raw"][:]:
+                ema = float(rg) if ema is None else \
+                    alpha * float(rg) + (1 - alpha) * ema
+                rec.append(ema)
+            assert np.allclose(rec, gate, atol=1e-6), \
+                f"{ep}: gate != EMA(gate_raw)"
 
         assert (g["planner_pick"][:] == score.argmax(1)).all(), \
             f"{ep}: planner_pick != argmax(score)"
@@ -83,11 +96,63 @@ def verify_file(path, jnd=0.05):
     return stats
 
 
+def verify_pair(kept_path, removed_path, jnd=0.05):
+    sk = verify_file(kept_path, jnd=jnd, ema_check=False)
+    sr = verify_file(removed_path, jnd=jnd, ema_check=False)
+    fk = h5py.File(kept_path, "r")
+    fr = h5py.File(removed_path, "r")
+    assert fk.attrs["filter_role"] == "kept", f"{kept_path}: not the kept file"
+    assert fr.attrs["filter_role"] == "removed", \
+        f"{removed_path}: not the removed file"
+    assert fk.attrs["source_files"] == fr.attrs["source_files"]
+    assert fk.attrs["recipe"] == fr.attrs["recipe"]
+    thr = float(fk.attrs["filter_threshold"])
+    alpha = json.loads(fk.attrs["recipe"])["gate_alpha"]
+    n_eps = 0
+    for ep in sorted(set(fk) | set(fr)):
+        sides = [(f[ep], role) for f, role in ((fk, "kept"), (fr, "removed"))
+                 if ep in f]
+        corig = {int(g.attrs["cycles_orig"]) for g, _ in sides}
+        assert len(corig) == 1, f"{ep}: cycles_orig disagrees across sides"
+        C = corig.pop()
+        idx = np.concatenate([g["orig_cycle_idx"][:] for g, _ in sides])
+        assert np.array_equal(np.sort(idx), np.arange(C)), \
+            f"{ep}: kept+removed do not partition the original cycles"
+        graw, gate = np.empty(C), np.empty(C)
+        for g, role in sides:
+            i = g["orig_cycle_idx"][:]
+            graw[i], gate[i] = g["gate_raw"][:], g["gate"][:]
+            lab, sc = g["labels"][:], g["score"][:]
+            small = np.ones(len(sc), bool)
+            for v in (lab[:, :, 0], lab[:, :, 1], sc):
+                small &= (v.max(axis=1) - v.min(axis=1)) < thr
+            assert small.all() if role == "removed" else not small.any(), \
+                f"{ep}: a cycle sits on the wrong side of the R10 rule"
+        ema, rec = None, []
+        for rg in graw:
+            ema = float(rg) if ema is None else \
+                alpha * float(rg) + (1 - alpha) * ema
+            rec.append(ema)
+        assert np.allclose(rec, gate, atol=1e-6), \
+            f"{ep}: merged gate != EMA(gate_raw)"
+        n_eps += 1
+    print(f"PAIR_OK — {n_eps} source episodes partition exactly; kept "
+          f"{sk['cycles']:,} cycles / {sk['eps']} eps "
+          f"(tie rate {sk['ties']/max(sk['cycles'],1):.1%}), removed "
+          f"{sr['cycles']:,} cycles / {sr['eps']} eps; merged gate EMA and "
+          f"R10 rule (thr {thr}) hold everywhere")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--jnd", type=float, default=0.05)
+    ap.add_argument("--removed", default=None,
+                    help="companion _removed.h5; paths must be the kept file")
     args = ap.parse_args()
+    if args.removed:
+        assert len(args.paths) == 1, "--removed takes exactly one kept file"
+        return verify_pair(args.paths[0], args.removed, jnd=args.jnd)
     tot = dict(eps=0, cycles=0, ties=0, by_policy={})
     for p in args.paths:
         s = verify_file(p, jnd=args.jnd)
