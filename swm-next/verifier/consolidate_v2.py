@@ -63,7 +63,8 @@ def main():
     args = ap.parse_args()
     out_rm = args.out.replace(".h5", "_removed.h5")
 
-    recipe = None
+    recipe = None          # canonical recipe JSON, execution device stripped
+    devices = set()
     outs = {}
     for role, path in (("kept", args.out), ("removed", out_rm)):
         f = h5py.File(path, "w")
@@ -85,9 +86,12 @@ def main():
         shard = os.path.basename(path)
         with h5py.File(path, "r") as src:
             assert src.attrs.get("schema_version") == 2, f"{path}: not v2"
-            r = src.attrs["recipe"]
-            assert recipe in (None, r), f"{path}: recipe differs across shards"
-            recipe = r
+            r = json.loads(src.attrs["recipe"])
+            devices.add(r.get("config", {}).pop("device", None))
+            canon = json.dumps(r, sort_keys=True)
+            assert recipe in (None, canon), \
+                f"{path}: recipe differs across shards beyond config.device"
+            recipe = canon
             for ep in src:
                 g = src[ep]
                 lab, sc = g["labels"][:], g["score"][:]
@@ -106,7 +110,9 @@ def main():
         print(f"{shard}: done ({tot['eps']} eps so far)", flush=True)
 
     for role, f in outs.items():
-        f.attrs["recipe"] = recipe
+        rec = json.loads(recipe)
+        rec.setdefault("config", {})["device"] = sorted(d for d in devices if d)
+        f.attrs["recipe"] = json.dumps(rec)
         f.attrs["episodes"] = tot[f"eps_{role}"]
         f.attrs["cycles"] = tot[role]
         f.close()
