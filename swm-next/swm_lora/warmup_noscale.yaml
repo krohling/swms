@@ -1,0 +1,29 @@
+# Encoder warm-up ablation: NO projector gain (learnable_scale: false), so
+# trajectory tokens enter at raw MLP magnitude (1x, ~8x Qwen's text-embedding
+# RMS). Everything else matches warmup_encoder.yaml except denser evals
+# (val_every 50 — the 0.1x run converged before its first eval at 500) and a
+# tighter step ceiling.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+h5_paths: [datasets_swm/bg_hybrid_k8_s30000.h5, datasets_swm/bg_hybrid_k8_s31000.h5,
+           datasets_swm/bg_hybrid_k8_s32100.h5, datasets_swm/bg_hybrid_k8_s33200.h5,
+           datasets_swm/bg_hybrid_k8_s34300.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+micro_cycles: 2
+accum_cycles: 6                # eff 12 lists/step, same geometry as run4
+learnable_scale: false         # THE ablation: no scalar, tokens at 1x
+proj_hidden: 512
+traj_cumsum: true
+learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
+max_steps: 6000
+max_grad_norm: 1.0
+val_every: 50
+ckpt_every: 250
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: warmup-noscale-1x
+out_dir: outputs_swm_lora/warmup_noscale

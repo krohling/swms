@@ -30,11 +30,15 @@ NO_VARIANTS = [" No", " no", "No", "no"]
 
 class TrajectoryProjector(nn.Module):
     def __init__(self, action_dim, d_model, hidden=512, init_scale=0.0,
-                 cumsum=False):
+                 cumsum=False, learnable_scale=True):
         """init_scale=0 -> exact-base at step 0 (run-1 behavior; shown to let
         the frame-mean shortcut win while the gate stays shut). init_scale>0
         (run-2: 0.1) opens the trajectory channel from the start; LoRA B=0
         still keeps the LM itself at base behavior at init.
+
+        learnable_scale=False removes the gain entirely (fixed 1x): the raw
+        MLP output is injected unscaled, ~8x the RMS of Qwen's own text
+        embeddings (measured 0.17 vs 0.022 median) — the magnitude ablation.
 
         cumsum=True widens each step's input to [a_t, cumsum(a)_t / H]: the
         running integral gives every token its displacement-so-far (and the
@@ -50,7 +54,10 @@ class TrajectoryProjector(nn.Module):
         else:
             self.net = nn.Sequential(
                 nn.Linear(in_dim, hidden), nn.GELU(), nn.Linear(hidden, d_model))
-        self.scale = nn.Parameter(torch.tensor([float(init_scale)]))
+        if learnable_scale:
+            self.scale = nn.Parameter(torch.tensor([float(init_scale)]))
+        else:
+            self.register_buffer("scale", torch.ones(1))
 
     def forward(self, actions):                     # (B, H, A) -> (B, H, D)
         if self.cumsum:
@@ -68,7 +75,7 @@ class QwenSWM(nn.Module):
                  horizon=16, lora_r=16, lora_alpha=32, lora_dropout=0.05,
                  device="cuda", dtype=torch.bfloat16, proj_init_scale=0.0,
                  traj_cumsum=False, lora_targets="attention", apply_lora=True,
-                 proj_hidden=512):
+                 proj_hidden=512, proj_learnable_scale=True):
         """lora_targets: "attention" (q/k/v/o, the run1-4 recipe) or
         "all-linear" (+ the transformer MLPs gate/up/down).
         apply_lora=False builds NO adapters: the LM is exactly base Qwen and
@@ -101,7 +108,8 @@ class QwenSWM(nn.Module):
         self.projector = TrajectoryProjector(action_dim, d_model,
                                              hidden=proj_hidden,
                                              init_scale=proj_init_scale,
-                                             cumsum=traj_cumsum)
+                                             cumsum=traj_cumsum,
+                                             learnable_scale=proj_learnable_scale)
         # projector stays fp32 (stable AdamW on the zero-init scale);
         # the scatter hook casts its output to the model dtype.
         self.horizon = horizon
