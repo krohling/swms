@@ -1,9 +1,12 @@
 # Weighted warm-up arms (projector only, no LoRA, fixed LR): which training
-# lists deserve gradient? weighting is the ONLY variable vs warmup_encoder.yaml
-# (exp1-warmup-encoder baseline): "spread" (list std of teacher scores),
+# lists deserve gradient? Arms: "spread" (list std of teacher scores),
 # "invbin" (inverse score-bin frequency per trajectory), "invbin_spread"
 # (product). The launcher substitutes the arm; all weights are mean-1.0 over
 # the train split, and the val pass stays uniform for every arm.
+# Second round (wns, 2026-10-22): the projector scalar is removed (fixed 1x
+# tokens) after the no-scale arm beat the scaled baseline; weighting is now
+# the only variable vs warmup-noscale-1x. The first-round scaled arms
+# (warmup-w-*) all lost to their scaled uniform control.
 model_id: Qwen/Qwen3-VL-8B-Instruct
 action_dim: 5
 horizon: 16
@@ -15,7 +18,7 @@ questions: planner
 val_frac: 0.05
 micro_cycles: 2
 accum_cycles: 6                # eff 12 lists/step, same geometry as run4
-proj_init_scale: 0.1           # learned gain kept — weighting is the variable
+learnable_scale: false         # fixed 1x tokens — control is warmup-noscale-1x
 proj_hidden: 512
 traj_cumsum: true
 weighting: spread              # launcher sed: spread | invbin | invbin_spread
@@ -28,5 +31,5 @@ ckpt_every: 250
 seed: 0
 device: cuda
 wandb_project: swm-lora
-run_name: warmup-w-spread
-out_dir: outputs_swm_lora/warmup_w_spread
+run_name: warmup-wns-spread
+out_dir: outputs_swm_lora/warmup_wns_spread
