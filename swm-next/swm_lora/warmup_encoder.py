@@ -28,6 +28,60 @@ from data import (CycleDataset, action_stats, collate_cycles,  # noqa: E402
 from train4 import within_cycle_rho                          # noqa: E402
 
 
+def build_weight_fn(h5_paths, episodes, mode, bin_width=0.05):
+    """Per-sample loss weights from train-split label statistics.
+
+    Modes: "invbin" — each trajectory weighted inversely to how common its
+    teacher-score bin is (bin_width resolution; 43% of labels sit in the
+    first 0.05 bin); "spread" — every trajectory in a list weighted by the
+    list's teacher-score std (sub-JND tie lists are 46% of lists but carry
+    ~no ranking signal, yet kept ~35% of gradient mass on the run-4 ckpt);
+    "invbin_spread" — product of the two. Every mode is normalized to mean
+    1.0 over the train set so the effective LR matches the uniform baseline.
+    The val pass stays uniform for all modes.
+
+    Returns f(targets (m, k) ndarray) -> weights (m, k) ndarray.
+    """
+    import h5py
+    nb = int(round(1.0 / bin_width))
+    spreads, bins = [], []
+    by_pi = {}
+    for pi, ep in episodes:
+        by_pi.setdefault(pi, []).append(ep)
+    for pi, eps in by_pi.items():
+        with h5py.File(h5_paths[pi], "r") as f:
+            for ep in eps:
+                lab = f[ep]["labels"][:]
+                for col in (0, 1):                     # approach, place
+                    t = lab[:, :, col].astype(np.float64)
+                    spreads.append(t.std(axis=1))
+                    bins.append(np.minimum((t / bin_width).astype(np.int64),
+                                           nb - 1))
+    spreads = np.concatenate(spreads)                  # (L,)   per list
+    bins = np.concatenate(bins, axis=0)                # (L, k) per trajectory
+    counts = np.bincount(bins.ravel(), minlength=nb).astype(np.float64)
+    inv = 1.0 / np.maximum(counts, 1.0)
+    inv /= inv[bins.ravel()].mean()                    # mean 1 over trajectories
+    mean_spread = spreads.mean()
+    comb_mean = (inv[bins] * (spreads / mean_spread)[:, None]).mean()
+    print(f"weighting={mode}: {len(spreads):,} train lists, mean spread "
+          f"{mean_spread:.4f}, bin counts {counts.astype(int).tolist()}",
+          flush=True)
+
+    def fn(targets):                                   # (m, k) -> (m, k)
+        b = np.minimum((targets / bin_width).astype(np.int64), nb - 1)
+        w_inv = inv[b]
+        w_sp = (targets.std(axis=1) / mean_spread)[:, None]
+        if mode == "invbin":
+            return w_inv
+        if mode == "spread":
+            return np.broadcast_to(w_sp, targets.shape).copy()
+        if mode == "invbin_spread":
+            return w_inv * w_sp / comb_mean
+        raise ValueError(f"unknown weighting mode {mode!r}")
+    return fn
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
@@ -61,6 +115,12 @@ def main():
           f"(projector only)", flush=True)
 
     opt = torch.optim.AdamW(params, lr=float(cfg["learning_rate"]))
+
+    wmode = cfg.get("weighting", "none")
+    weight_fn = None
+    if wmode != "none":
+        weight_fn = build_weight_fn(cfg["h5_paths"], train_eps, wmode,
+                                    bin_width=float(cfg.get("weight_bin", 0.05)))
 
     import wandb
     run = wandb.init(project=cfg.get("wandb_project", "swm-lora"),
@@ -115,7 +175,15 @@ def main():
             except StopIteration:
                 it = iter(dl); b = next(it)
             l = model.answer_logit(b["images"], b["questions"], b["trajs"])
-            bce = model.loss(l, b["targets"].to(l.device))
+            if weight_fn is None:
+                bce = model.loss(l, b["targets"].to(l.device))
+            else:
+                w = torch.from_numpy(
+                    weight_fn(b["targets"].numpy().reshape(b["m"], b["k"]))
+                ).ravel().to(l.device, l.dtype)
+                per = torch.nn.functional.binary_cross_entropy_with_logits(
+                    l, b["targets"].to(l.device, l.dtype), reduction="none")
+                bce = (w * per).mean()
             (bce / accum).backward()
             acc += float(bce) / accum
         gn = torch.nn.utils.clip_grad_norm_(params, clip)
