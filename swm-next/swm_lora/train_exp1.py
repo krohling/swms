@@ -130,10 +130,10 @@ def main():
             except Exception as e:
                 print(f"skip resume {p}: {e}", flush=True)
 
-    import wandb
-    run = wandb.init(project=cfg.get("wandb_project", "swm-lora"),
-                     name=cfg.get("run_name"), config=cfg, resume="allow",
-                     id=cfg.get("run_name"))
+    from wandb_safe import SafeRun
+    run = SafeRun(project=cfg.get("wandb_project", "swm-lora"),
+                  name=cfg.get("run_name"), config=cfg, resume="allow",
+                  id=cfg.get("run_name"))
 
     def val_pass(max_lists=200):
         model.model.eval()

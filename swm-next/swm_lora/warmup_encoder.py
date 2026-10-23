@@ -122,10 +122,10 @@ def main():
         weight_fn = build_weight_fn(cfg["h5_paths"], train_eps, wmode,
                                     bin_width=float(cfg.get("weight_bin", 0.05)))
 
-    import wandb
-    run = wandb.init(project=cfg.get("wandb_project", "swm-lora"),
-                     name=cfg.get("run_name"), config=cfg, resume="allow",
-                     id=cfg.get("run_name"))
+    from wandb_safe import SafeRun
+    run = SafeRun(project=cfg.get("wandb_project", "swm-lora"),
+                  name=cfg.get("run_name"), config=cfg, resume="allow",
+                  id=cfg.get("run_name"))
 
     mc = int(cfg["micro_cycles"])
     accum = int(cfg["accum_cycles"])
