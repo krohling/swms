@@ -103,13 +103,23 @@ def main():
     val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}", flush=True)
 
-    model = QwenSWM(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
-                    horizon=cfg["horizon"], device=device,
-                    apply_lora=False,                       # base LM, frozen
-                    proj_init_scale=float(cfg.get("proj_init_scale", 0.1)),
-                    proj_hidden=cfg.get("proj_hidden", 512),
-                    proj_learnable_scale=bool(cfg.get("learnable_scale", True)),
-                    traj_cumsum=bool(cfg.get("traj_cumsum", False)))
+    if cfg.get("backbone", "qwen") == "paligemma":
+        from model_pg import PaliGemmaSWM
+        model = PaliGemmaSWM(
+            base_model=cfg.get("base_model", "google/paligemma-3b-pt-224"),
+            processor_path=cfg["processor_path"],
+            action_dim=cfg["action_dim"], horizon=cfg["horizon"],
+            device=device, proj_hidden=cfg.get("proj_hidden", 512),
+            traj_cumsum=bool(cfg.get("traj_cumsum", False)),
+            full_finetune=False)                    # base frozen, no scalar
+    else:
+        model = QwenSWM(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
+                        horizon=cfg["horizon"], device=device,
+                        apply_lora=False,                   # base LM, frozen
+                        proj_init_scale=float(cfg.get("proj_init_scale", 0.1)),
+                        proj_hidden=cfg.get("proj_hidden", 512),
+                        proj_learnable_scale=bool(cfg.get("learnable_scale", True)),
+                        traj_cumsum=bool(cfg.get("traj_cumsum", False)))
     params = model.trainable_parameters()
     print(f"trainable {sum(p.numel() for p in params)/1e6:.2f}M "
           f"(projector only)", flush=True)

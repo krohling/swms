@@ -1,0 +1,32 @@
+# PaliGemma full-weight score regression: exp1b's data/warm-up/no-scalar
+# learnings on the authors' backbone, with the capacity ceiling removed.
+# Optimizer regime = the proven repro recipe (A.1): fp32 + bf16 autocast,
+# AdamW, linear LR decay from 1e-5 (no warmup), clip 1.0, effective batch
+# 96 sequences (= 12 lists/step, identical geometry to exp1/exp1b).
+base_model: google/paligemma-3b-pt-224
+processor_path: ckpts/paligemma_wm_ogbench
+action_dim: 5
+horizon: 16
+h5_paths: [datasets_swm/bg_hybrid_v2_k8_r10.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3                      # ~80k steps, exp1b-comparable (repro used 64k)
+micro_cycles: 2
+accum_cycles: 6
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/warmup_pg/ckpt_step6000   # final, not best-val
+learning_rate: 1.0e-5          # A.1: linear decay starting at 1e-5
+warmup_frac: 0.0
+weight_decay: 0.0
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 4000               # full saves are 12GB fp32 each
+resume_every: 2000             # resume states ~36GB, atomic, keep-2
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: pg-fullft-v2r10
+out_dir: ${SCRATCH}/swm-pg-fullft   # checkpoints on scratch, not quota'd $WORK
