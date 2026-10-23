@@ -1,0 +1,39 @@
+# Experiment 1b: exp1 recipe on the v2 R10-filtered dataset, warm-started
+# from the winning no-scale warm-up (deep eval 2026-10-23: uniform no-scale
+# beat the scaled baseline and every weighted arm on BCE / rho_inf / top-1
+# regret / pair accuracy). Changes vs train_exp1.yaml:
+#   - data: v1 5-shard hybrid -> consolidated v2 R10 (tie cycles removed;
+#     337,618 per-question lists ~= v1's 338,748, so same epochs geometry)
+#   - init_projector: scaled warmup step1500 -> no-scale warmup step6000
+#   - learnable_scale: false (tokens at 1x; matches the warm-up it loads)
+# Everything else identical to exp1 (still running as the v1 baseline arm).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_hybrid_v2_k8_r10.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 lists/step, same geometry as run4/exp1
+learnable_scale: false         # fixed 1x tokens, as in the warm-up it loads
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/warmup_noscale/ckpt_step6000
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp1b-v2r10-noscale
+out_dir: outputs_swm_lora/exp1b_full

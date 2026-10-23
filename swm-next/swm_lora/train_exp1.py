@@ -91,6 +91,7 @@ def main():
                     lora_targets=cfg.get("lora_targets", "all-linear"),
                     proj_hidden=cfg.get("proj_hidden", 512),
                     proj_init_scale=float(cfg.get("proj_init_scale", 0.1)),
+                    proj_learnable_scale=bool(cfg.get("learnable_scale", True)),
                     traj_cumsum=bool(cfg.get("traj_cumsum", False)))
     params = model.trainable_parameters()
     print(f"trainable {sum(p.numel() for p in params)/1e6:.1f}M | "
