@@ -1,0 +1,35 @@
+# Experiment 2b: planner-aligned selector, HARD-CE arm.
+# Identical to exp2a except the loss: plain CE on the teacher's argmax (the
+# stored planner pick) — treats every list as having a confident winner,
+# including residual blended near-ties (~10% of R10-kept cycles).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+k: 8
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear
+h5_paths: [datasets_swm/bg_hybrid_v2_k8_r10.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+val_frac: 0.05
+epochs: 3
+micro_lists: 4
+accum_lists: 4                 # eff 16 cycles per opt step
+loss: hard
+proj_hidden: 512
+traj_cumsum: true
+learnable_scale: false
+init_adapters: outputs_swm_lora/exp1b_full/ckpt_final
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_cycles: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp2b-selector-hardce
+out_dir: outputs_swm_lora/exp2b_full

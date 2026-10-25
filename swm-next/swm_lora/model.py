@@ -211,3 +211,124 @@ class QwenSWM(nn.Module):
             set_peft_model_state_dict(self.model, st.load_file(f))
         self.projector.load_state_dict(
             torch.load(f"{path}/projector.pt", map_location=self.device))
+
+
+class QwenSWMSelector(QwenSWM):
+    """Exp-2 selection variant: ONE forward sees the frame, the gate value,
+    and ALL k candidate trajectories (k blocks of `horizon` placeholder
+    tokens); the readout is a k-way distribution over the digit tokens
+    "1".."k" at the final position. Attention can compare candidates directly
+    — relative judgment instead of k independent absolute scores.
+
+    Planner-aligned (team call 2026-10-16): the target is the teacher's
+    gate-BLENDED planner score per candidate (v2 `score`), not a per-question
+    preference — per-question selection doesn't compose into the planner's
+    gate-blended decision (run5/5b invalidation). The gate enters as a
+    literal number in the prompt; at deployment the caller maintains the same
+    EMA from this model's own zero-trajectory grasp probe (answer_logit), so
+    train and eval conditioning match.
+
+    Same projector (shared across candidates) and LoRA recipe as QwenSWM;
+    checkpoint format is a superset (selector_extra.pt adds cand_embed), so a
+    scoring-arm checkpoint warm-starts a selector directly. k <= 9
+    (single-digit answer tokens)."""
+
+    def __init__(self, k=8, **kw):
+        super().__init__(**kw)
+        assert 1 < k <= 9, "selection head uses single-digit answer tokens"
+        self.k = k
+        tok = self.processor.tokenizer
+
+        def singles(cands):
+            return [tok(c, add_special_tokens=False).input_ids[0]
+                    for c in cands
+                    if len(tok(c, add_special_tokens=False).input_ids) == 1]
+        self.digit_ids = []
+        for i in range(k):
+            ids = singles([f" {i+1}", f"{i+1}"])
+            assert ids, f"no single-token encoding for candidate index {i+1}"
+            self.digit_ids.append(ids)
+
+        # learned candidate-index embedding, added to every token of block i
+        # (binds block identity into content; zero-init so a warm start from a
+        # scoring-arm checkpoint is exactly preserved at step 0). fp32 like
+        # the projector; the scatter hook casts to model dtype.
+        d_model = self.model.config.text_config.hidden_size
+        self.cand_embed = nn.Parameter(
+            torch.zeros(k, d_model, device=self.device))
+
+    def build_selection_inputs(self, images, q_approach, q_place, gates):
+        texts = []
+        blocks = "".join(
+            f" Trajectory {i+1}: " + TRAJ_PLACEHOLDER * self.horizon
+            for i in range(self.k))
+        for qa, qp, g in zip(q_approach, q_place, gates):
+            content = [{"type": "image"},
+                       {"type": "text",
+                        "text": f"Here are {self.k} candidate trajectories "
+                                f"for the robot.{blocks} Gate: {float(g):.2f}."
+                                f" Early objective (gate near 0): {qa}"
+                                f" Late objective (gate near 1): {qp}"
+                                f" Given the gate value, which trajectory best"
+                                f" advances the current objective? Answer with"
+                                f" a single number from 1 to {self.k}."}]
+            msgs = [{"role": "user", "content": content}]
+            texts.append(self.processor.apply_chat_template(
+                msgs, add_generation_prompt=True, tokenize=False))
+        return self.processor(text=texts, images=[[im] for im in images],
+                              return_tensors="pt", padding=True)
+
+    def selection_logits(self, images, q_approach, q_place, gates, trajs):
+        """trajs: (B, k, H, A) normalized -> (B, k) digit logits (LSE over
+        token variants per candidate index)."""
+        B, k, H, A = trajs.shape
+        assert k == self.k
+        inputs = self.build_selection_inputs(
+            images, q_approach, q_place, gates).to(self.device)
+        te = self.projector(trajs.to(self.device, dtype=torch.float32)
+                            .reshape(B * k, H, A)).reshape(B, k, H, -1)
+        te = (te + self.cand_embed[None, :, None, :]).reshape(B, k * H, -1)
+        self._pending = (inputs["input_ids"], te)
+        try:
+            out = self.model(**inputs)
+        finally:
+            self._pending = None
+        mask = inputs["attention_mask"]
+        last = mask.sum(dim=1) - 1
+        idx = torch.arange(out.logits.shape[0], device=out.logits.device)
+        z = out.logits[idx, last, :].float()
+        return torch.stack(
+            [torch.logsumexp(z[:, ids], dim=-1) for ids in self.digit_ids],
+            dim=-1)                                        # (B, k)
+
+    @staticmethod
+    def selection_loss(z, teacher_scores, tau=0.1):
+        """Listwise soft cross-entropy toward the teacher's softmax over
+        blended scores. tau ~ 2x the teacher JND (|dp| ~ 0.05): near-ties ->
+        near-uniform target (no penalty for picking either), clear winners ->
+        sharp."""
+        t = torch.softmax(teacher_scores / tau, dim=-1)
+        return -(t * torch.log_softmax(z, dim=-1)).sum(-1).mean()
+
+    @staticmethod
+    def selection_loss_hard(z, teacher_scores):
+        """Plain CE on the teacher's argmax (the stored planner pick, modulo
+        the sample's candidate permutation)."""
+        return F.cross_entropy(z, teacher_scores.argmax(dim=-1))
+
+    def trainable_parameters(self):
+        return super().trainable_parameters() + [self.cand_embed]
+
+    def save_adapters(self, path):
+        super().save_adapters(path)
+        torch.save({"cand_embed": self.cand_embed.detach().cpu()},
+                   f"{path}/selector_extra.pt")
+
+    def load_adapters(self, path):
+        import os
+        super().load_adapters(path)
+        f = f"{path}/selector_extra.pt"
+        if os.path.exists(f):                      # absent in scoring-arm
+            st = torch.load(f, map_location=self.device)  # ckpts (warm start)
+            with torch.no_grad():
+                self.cand_embed.copy_(st["cand_embed"])

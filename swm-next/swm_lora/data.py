@@ -166,6 +166,75 @@ def collate_cycles(batch):
                 targets=torch.cat([b["targets"] for b in batch]))
 
 
+class PlannerSelectionDataset(Dataset):
+    """Exp-2 unit: one sample per planning CYCLE — frame_t, all k candidates,
+    and the teacher's gate-BLENDED per-candidate scores (v2 `score`) plus the
+    gate EMA that produced them (v2 `gate`). This is the planner's actual
+    decision; run5/5b's per-question selection didn't compose into it
+    (invalidated 2026-10-16). Requires schema_version-2 files (score/gate/
+    planner_pick present; planner_pick == argmax(score) by construction).
+
+    Candidates are permuted per access — the h5 stores them in temperature-
+    ladder order, so without shuffling, slot position carries label signal
+    (slot 0 is always the greedy sample). Training draws a fresh permutation
+    each access; validation uses a fixed per-index permutation so metrics are
+    deterministic."""
+
+    def __init__(self, h5_paths, episodes, amin, amax, fixed_perm=False):
+        self.paths = list(h5_paths)
+        self.amin, self.amax = amin, amax
+        self.fixed_perm = fixed_perm
+        self._files = None
+        self.index = []          # (path_idx, ep, cycle, q_app, q_place)
+        for pi, ep in episodes:
+            with h5py.File(self.paths[pi], "r") as f:
+                g = f[ep]
+                assert "score" in g and "gate" in g, \
+                    f"{ep}: selection training needs schema_version 2"
+                C = g["score"].shape[0]
+                qa, qp = str(g.attrs["q_approach"]), str(g.attrs["q_place"])
+            for c in range(C):
+                self.index.append((pi, ep, c, qa, qp))
+
+    def _f(self, pi):
+        if self._files is None:
+            self._files = [None] * len(self.paths)
+        if self._files[pi] is None:
+            self._files[pi] = h5py.File(self.paths[pi], "r")
+        return self._files[pi]
+
+    def __len__(self):
+        return len(self.index)
+
+    def __getitem__(self, i):
+        pi, ep, c, qa, qp = self.index[i]
+        g = self._f(pi)[ep]
+        img = Image.open(io.BytesIO(g["frames_t"][c].tobytes())).convert("RGB")
+        trajs = normalize(g["trajs"][c].astype(np.float32), self.amin, self.amax)
+        scores = g["score"][c].astype(np.float32)
+        k = trajs.shape[0]
+        rng = np.random.RandomState(i) if self.fixed_perm else np.random
+        perm = np.ascontiguousarray(rng.permutation(k))
+        return dict(image=img, q_approach=qa, q_place=qp,
+                    gate=np.float32(g["gate"][c]),
+                    trajs=torch.from_numpy(trajs[perm]),
+                    scores=torch.from_numpy(scores[perm]))
+
+
+def collate_planner(batch):
+    """M cycles -> one selection forward: images/questions len M,
+    gates (M,), trajs (M,k,H,A), scores (M,k)."""
+    k = batch[0]["trajs"].shape[0]
+    assert all(b["trajs"].shape[0] == k for b in batch), "mixed k in batch"
+    return dict(images=[b["image"] for b in batch],
+                q_approach=[b["q_approach"] for b in batch],
+                q_place=[b["q_place"] for b in batch],
+                gates=torch.tensor([b["gate"] for b in batch]),
+                k=k, m=len(batch),
+                trajs=torch.stack([b["trajs"] for b in batch]),
+                scores=torch.stack([b["scores"] for b in batch]))
+
+
 class ExecutedChunkDataset(Dataset):
     """Run-3 unit: one (executed chunk, question) sample from k=1 noisy
     capture files. Questions = 2 planner labels + the 6 aux questions stored
