@@ -1,0 +1,66 @@
+# Exp1 closed-loop SR curve (blue→green)
+
+**2026-10-25.** Closed-loop success rate of the exp1 score-regression SWM
+(`exp1-allinear-warmstart`: run4 recipe + all-linear LoRA r16 + warm-started
+encoder, v1 data) used as the MPC scorer, across the training trajectory.
+
+## Setup
+
+- Harness: `swm-next/swm_lora/eval_closed_loop.py` @ `1eefec5` on m5 (MPS).
+  The fix in `1eefec5` matters: before it, the harness rebuilt the model with
+  attention-only LoRA and peft's non-strict loading silently dropped the MLP
+  adapter weights of all-linear checkpoints. Verified post-fix: 504/504
+  adapter tensors load (attention-only loads 288).
+- Deployment-faithful scoring: zero-traj probe as frame-only gate,
+  EMA α=0.35, score = (1−g)·p_app + g·(0.6·p_place + 0.4·p_hold), k=8
+  temperature ladder 0→2, L16, 4 actions/cycle, max 50 cycles.
+- 50 episodes/checkpoint, eval seeds 6000–6049 — the same seed set as every
+  anchor below, so columns are directly comparable and pairable.
+- Checkpoints pulled from Vista `outputs_swm_lora/exp1_full` (training
+  completed cleanly at step 84,687; ~3 epochs).
+
+## Results
+
+| scorer | SR (n=50) |
+|---|---|
+| exp1 @16k | 54% |
+| exp1 @42k | 54% |
+| exp1 @64k | 54% |
+| exp1 @84,687 (final) | **56%** |
+| base diffusion k=1 (`outputs_base/blue_green_k1`) | 56% |
+| run4 @23k (`experiments/run4/eval_cl_23k_bg_k8.json`) | 42% |
+| run4 @84k final (run4 REPORT) | 52% |
+| teacher judge-MPC soft-gate k=8 (`outputs_verifier_mpc_softgate_ema_k8_n50`) | 64% |
+
+Per-episode JSONs: `experiments/exp1/eval_cl_step{16000,42000,64000,84687}_bg_k8.json`.
+
+Paired sign tests (same seeds):
+
+- exp1-final vs base-k1: 9 discordant each way, p = 1.00 — **exact parity**.
+- exp1-final vs teacher-k8: teacher wins 7 of 10 discordant, p = 0.34
+  (underpowered at n=50, direction consistent with the 8-pt gap).
+- exp1-final vs run4@23k: exp1 wins 10 of 13 discordant, p = 0.09.
+
+Mean cycles-to-success ≈ 19 of 50 at all points. Checkpoint-to-checkpoint
+per-seed churn is high (~half of the union of successes flip between any two
+checkpoints) — consistent with selection noise, not an accumulating skill.
+
+## Reading
+
+1. **Exp1 is base parity closed-loop, end to end.** The curve is flat
+   (54/54/54/56) and the final point is seed-for-seed even with running the
+   diffusion policy alone. The teacher's +8 over base (64 vs 56) is not
+   captured at any checkpoint.
+2. **Offline gains again failed to convert.** Exp1 set project-best offline
+   numbers (val BCE 0.490, ρ_inf 0.298) — closed-loop didn't move. Third
+   consecutive arm (run4, run5b, exp1) where offline fidelity and SR
+   decouple; reaffirms the standing lesson to never gate on offline ρ alone.
+3. **What all-linear + warm-up did buy:** run4 passed through an actively
+   harmful phase (42% @23k, 10 pts below base); exp1 is never below base at
+   any measured point and reaches base parity by 16k instead of 84k. The
+   extra capacity/warm-up made the model harmless faster; it did not make it
+   useful.
+4. **Open hypotheses, already in flight:** teacher signal density (exp1b:
+   R10 tie-filtered v2 data + no-scale warm-up, training now) and backbone/
+   capacity ceiling (pg-fullft: PaliGemma-3B full-weight, queued on Vista).
+   Their SR curves go through this same harness and seed set.
