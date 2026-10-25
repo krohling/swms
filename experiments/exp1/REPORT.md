@@ -64,3 +64,35 @@ checkpoints) — consistent with selection noise, not an accumulating skill.
    R10 tie-filtered v2 data + no-scale warm-up, training now) and backbone/
    capacity ceiling (pg-fullft: PaliGemma-3B full-weight, queued on Vista).
    Their SR curves go through this same harness and seed set.
+
+## Full 3-task suite (added 2026-10-25)
+
+Same harness/seeds, by/yr via the teacher-suite configs (template questions
+in each task's colors — the run4 OOD protocol; exp1 trained on bg only).
+
+| scorer | bg | by | yr | suite |
+|---|---|---|---|---|
+| exp1 @16k | 54 | 54 | 48 | 52.0 |
+| exp1 @42k | 54 | 58 | 52 | **54.7** |
+| exp1 @64k | 54 | 58 | 42 | 51.3 |
+| exp1 @84,687 final | 56 | 60 | 44 | 53.3 |
+| base diffusion k=1 | 56 | 48 | 38 | 47.3 |
+| random-pick k=8 (matched-k) | 48 | 56 | 38 | 47.3 |
+| run4 final | 52 | 54 | 44 | 50.0 |
+| teacher judge-MPC k=8 | 64 | 68 | 62 | 64.7 |
+
+Suite read: exp1-final sits ~+6 over both no-knowledge controls, capturing
+~1/3 of the teacher's +17.4 lift over random (run4 captured ~15%). Pooled
+n=150/row → s.e. ~4 pts: directionally the best closed-loop result from a
+trained SWM so far, not yet significance. All suite-level gain is present by
+16k; OOD holds (by strongest at 60); bg remains at base parity.
+
+Per-episode JSONs: `experiments/exp1/eval_cl_step*_{bg,by,yr}_k8.json`;
+exp1b's ladder accumulates in `experiments/exp1b/` as training progresses
+(16k row: bg 52 / by 58 / yr 40, agg 50.0 — base-level at 16k, like run4).
+
+**Compose baseline** (exp2 step 1, `experiments/exp2/compose_exp1_final.json`,
+4,000 held-out v2-R10 cycles, stored-gate blend): exp1-final's per-question
+predictions recover the planner's pick only 23.3% of the time (chance 12.5%),
+top-1 regret 0.186, pair-acc(≥0.10) 0.613. Composition is lossy — the
+selector arm's headroom argument, and the bar exp2 must beat.
