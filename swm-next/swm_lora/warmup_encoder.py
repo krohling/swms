@@ -6,6 +6,16 @@ the LM adapters simultaneously, so encoder quality was never observable in
 isolation. This stage answers "can the encoder learn a useful action
 representation at all?" and produces an initialization for full training.
 
+cfg "objective: selection" warms the encoder for the exp2 selector instead:
+QwenSWMSelector (still no LoRA), PlannerSelectionDataset, listwise soft-CE on
+the teacher's gate-blended scores — the all-8-in-context prompt is a
+different input distribution than the single-trajectory pointwise prompt, so
+the projector (+ the selector's candidate-index embeddings) get their own
+warm-up stage. cfg "init_projector" starts from an earlier warm-up's
+projector (e.g. the pointwise no-scale one) instead of random init. Both exp2
+loss arms share this encoder; the warm-up itself is listwise (hard CE is a
+degenerate tau->0 version of the same target).
+
 Fixed learning rate, no schedule: watch wandb for the loss plateau and pick a
 checkpoint (saved every ckpt_every steps); there is no automated stop.
 
@@ -98,21 +108,43 @@ def main():
                                        val_frac=cfg.get("val_frac", 0.05),
                                        seed=cfg.get("seed", 0))
     save_split(f"{out}/split.json", train_eps, val_eps, cfg["h5_paths"])
-    qsel = cfg.get("questions", "planner")
-    train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax, questions=qsel)
-    val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
+    objective = cfg.get("objective", "pointwise")
+    assert objective in ("pointwise", "selection"), objective
+    if objective == "selection":
+        from data import PlannerSelectionDataset, collate_planner
+        train_ds = PlannerSelectionDataset(cfg["h5_paths"], train_eps, amin, amax)
+        val_ds = PlannerSelectionDataset(cfg["h5_paths"], val_eps, amin, amax,
+                                         fixed_perm=True)
+        collate_fn = collate_planner
+        assert cfg.get("weighting", "none") == "none", \
+            "weighting applies to the pointwise objective only"
+    else:
+        qsel = cfg.get("questions", "planner")
+        train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax, questions=qsel)
+        val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
+        collate_fn = collate_cycles
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}", flush=True)
 
-    model = QwenSWM(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
-                    horizon=cfg["horizon"], device=device,
-                    apply_lora=False,                       # base LM, frozen
-                    proj_init_scale=float(cfg.get("proj_init_scale", 0.1)),
-                    proj_hidden=cfg.get("proj_hidden", 512),
-                    proj_learnable_scale=bool(cfg.get("learnable_scale", True)),
-                    traj_cumsum=bool(cfg.get("traj_cumsum", False)))
+    common = dict(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
+                  horizon=cfg["horizon"], device=device,
+                  apply_lora=False,                       # base LM, frozen
+                  proj_init_scale=float(cfg.get("proj_init_scale", 0.1)),
+                  proj_hidden=cfg.get("proj_hidden", 512),
+                  proj_learnable_scale=bool(cfg.get("learnable_scale", True)),
+                  traj_cumsum=bool(cfg.get("traj_cumsum", False)))
+    if objective == "selection":
+        from model import QwenSWMSelector
+        model = QwenSWMSelector(k=int(cfg.get("k", 8)), **common)
+    else:
+        model = QwenSWM(**common)
+    tau = float(cfg.get("tau", 0.1))
+    if cfg.get("init_projector"):
+        model.projector.load_state_dict(torch.load(
+            f"{cfg['init_projector']}/projector.pt", map_location=device))
+        print(f"projector warm-started from {cfg['init_projector']}", flush=True)
     params = model.trainable_parameters()
     print(f"trainable {sum(p.numel() for p in params)/1e6:.2f}M "
-          f"(projector only)", flush=True)
+          f"(encoder only)", flush=True)
 
     opt = torch.optim.AdamW(params, lr=float(cfg["learning_rate"]))
 
@@ -136,34 +168,52 @@ def main():
 
     def val_pass(max_lists=200):
         model.model.eval()
-        dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_cycles,
+        dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_fn,
                         num_workers=2)
-        bces, rhos_f = [], []
+        bces, rhos_f, top1, regret = [], [], [], []
         with torch.no_grad():
             seen = 0
             for b in dl:
                 if seen >= max_lists:
                     break
-                l = model.answer_logit(b["images"], b["questions"], b["trajs"])
-                tt = b["targets"].to(l.device)
-                bces.append(float(model.loss(l, tt)))
-                p = torch.sigmoid(l).cpu().numpy()
-                tt_np = b["targets"].numpy().reshape(b["m"], b["k"])
-                for mi in range(b["m"]):
-                    if tt_np[mi].std() > 0.05:
-                        rhos_f += within_cycle_rho(
-                            p.reshape(b["m"], b["k"])[mi], tt_np[mi], b["k"], 1)
+                if objective == "selection":
+                    z = model.selection_logits(b["images"], b["q_approach"],
+                                               b["q_place"], b["gates"],
+                                               b["trajs"])
+                    tt = b["scores"].to(z.device)
+                    bces.append(float(model.selection_loss(z, tt, tau=tau)))
+                    zn, tn = z.cpu().numpy(), b["scores"].numpy()
+                    for mi in range(b["m"]):
+                        if tn[mi].std() > 0.05:
+                            rhos_f += within_cycle_rho(zn[mi], tn[mi], b["k"], 1)
+                            pick = int(zn[mi].argmax())
+                            top1.append(float(pick == int(tn[mi].argmax())))
+                            regret.append(float(tn[mi].max() - tn[mi][pick]))
+                else:
+                    l = model.answer_logit(b["images"], b["questions"], b["trajs"])
+                    tt = b["targets"].to(l.device)
+                    bces.append(float(model.loss(l, tt)))
+                    p = torch.sigmoid(l).cpu().numpy()
+                    tt_np = b["targets"].numpy().reshape(b["m"], b["k"])
+                    for mi in range(b["m"]):
+                        if tt_np[mi].std() > 0.05:
+                            rhos_f += within_cycle_rho(
+                                p.reshape(b["m"], b["k"])[mi], tt_np[mi], b["k"], 1)
                 seen += b["m"]
         model.model.train()
-        return dict(bce=float(np.mean(bces)),
-                    within_cycle_rho_informative=(float(np.mean(rhos_f))
-                                                  if rhos_f else 0.0),
-                    rho_informative_n=len(rhos_f))
+        m = dict(bce=float(np.mean(bces)),
+                 within_cycle_rho_informative=(float(np.mean(rhos_f))
+                                               if rhos_f else 0.0),
+                 rho_informative_n=len(rhos_f))
+        if objective == "selection":
+            m.update(top1_acc=float(np.mean(top1)) if top1 else 0.0,
+                     regret=float(np.mean(regret)) if regret else 0.0)
+        return m
 
     model.model.train()
     g = torch.Generator().manual_seed(cfg.get("seed", 0))
     dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
-                    collate_fn=collate_cycles, num_workers=4, drop_last=True)
+                    collate_fn=collate_fn, num_workers=4, drop_last=True)
     it = iter(dl)
     step = 0
     while step < max_steps:
@@ -174,10 +224,15 @@ def main():
                 b = next(it)
             except StopIteration:
                 it = iter(dl); b = next(it)
-            l = model.answer_logit(b["images"], b["questions"], b["trajs"])
-            if weight_fn is None:
+            if objective == "selection":
+                z = model.selection_logits(b["images"], b["q_approach"],
+                                           b["q_place"], b["gates"], b["trajs"])
+                bce = model.selection_loss(z, b["scores"].to(z.device), tau=tau)
+            elif weight_fn is None:
+                l = model.answer_logit(b["images"], b["questions"], b["trajs"])
                 bce = model.loss(l, b["targets"].to(l.device))
             else:
+                l = model.answer_logit(b["images"], b["questions"], b["trajs"])
                 w = torch.from_numpy(
                     weight_fn(b["targets"].numpy().reshape(b["m"], b["k"]))
                 ).ravel().to(l.device, l.dtype)

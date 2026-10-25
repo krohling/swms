@@ -110,6 +110,19 @@ def main():
     if cfg.get("init_adapters"):
         model.load_adapters(cfg["init_adapters"])
         print(f"warm-started from {cfg['init_adapters']}", flush=True)
+    # selection-warmed encoder overrides the scoring-arm projector and brings
+    # its cand_embed (warmup_encoder.py objective: selection): staged init =
+    # scoring LoRA + selection-adapted encoder, applied in that order
+    if cfg.get("init_encoder"):
+        enc = cfg["init_encoder"]
+        model.projector.load_state_dict(torch.load(
+            f"{enc}/projector.pt", map_location=device))
+        sx = f"{enc}/selector_extra.pt"
+        if os.path.exists(sx):
+            st = torch.load(sx, map_location=device)
+            with torch.no_grad():
+                model.cand_embed.copy_(st["cand_embed"])
+        print(f"encoder (projector+cand_embed) from {enc}", flush=True)
     if args.resume == "auto":
         for p in reversed(sorted(glob.glob(f"{out}/resume_step*.pt"),
                 key=lambda q: int(q.split("step")[-1].split(".")[0]))):

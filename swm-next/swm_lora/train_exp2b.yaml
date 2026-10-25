@@ -21,6 +21,7 @@ proj_hidden: 512
 traj_cumsum: true
 learnable_scale: false
 init_adapters: outputs_swm_lora/exp1b_full/ckpt_final
+init_encoder: outputs_swm_lora/warmup_sel/ckpt_step6000
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0

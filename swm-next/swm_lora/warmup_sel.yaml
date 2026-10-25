@@ -1,0 +1,34 @@
+# Selector encoder warm-up (exp2 prerequisite, Kevin 2026-10-25): adapt the
+# trajectory encoder (+ candidate-index embeddings) to the all-8-in-context
+# selection prompt before full exp2 training — the prompt and placeholder
+# layout are a different input distribution than the pointwise warm-up's.
+# Recipe otherwise = the winning warm-up recipe: uniform (no weighting), NO
+# scalar (fixed 1x), fixed LR, run to 6000 and take the FINAL checkpoint.
+# Projector initializes from the pointwise no-scale warm-up (adapt, not cold).
+# Runs on LARG A100 (micro 2 x accum 8 = eff 16 cycles/step, exp2 geometry).
+objective: selection
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+k: 8
+h5_paths: [datasets_swm/bg_hybrid_v2_k8_r10.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+val_frac: 0.05
+micro_cycles: 2
+accum_cycles: 8                # eff 16 cycles/step
+tau: 0.1                       # listwise soft-CE temp ~ 2x teacher JND
+proj_hidden: 512
+traj_cumsum: true
+learnable_scale: false         # fixed 1x tokens, as everywhere post-deep-eval
+weighting: none
+init_projector: outputs_swm_lora/warmup_noscale/ckpt_step6000
+learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
+max_steps: 6000
+max_grad_norm: 1.0
+val_every: 50
+ckpt_every: 250
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: warmup-sel-noscale
+out_dir: outputs_swm_lora/warmup_sel
