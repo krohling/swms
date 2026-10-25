@@ -118,7 +118,13 @@ def main():
                   lora_alpha=tcfg["lora_alpha"], lora_dropout=0.0,
                   device=cfg["device"],
                   proj_init_scale=float(tcfg.get("proj_init_scale", 0.1)),
-                  traj_cumsum=bool(tcfg.get("traj_cumsum", False)))
+                  traj_cumsum=bool(tcfg.get("traj_cumsum", False)),
+                  # architecture must match the checkpoint being loaded:
+                  # set_peft_model_state_dict is non-strict, so a target-module
+                  # mismatch silently drops adapter weights instead of failing
+                  lora_targets=tcfg.get("lora_targets", "attention"),
+                  proj_hidden=tcfg.get("proj_hidden", 512),
+                  proj_learnable_scale=bool(tcfg.get("learnable_scale", True)))
     swm.load_adapters(args.ckpt)
     swm.model.eval()
 
