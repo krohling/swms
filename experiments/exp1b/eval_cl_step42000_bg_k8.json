@@ -1,0 +1,260 @@
+{
+ "ckpt": "outputs_swm_lora_local/exp1b_ckpt_step42000",
+ "task": "blue_cube_green_cube",
+ "k": 8,
+ "episodes": 50,
+ "seed_start": 6000,
+ "sr": 0.58,
+ "episodes_detail": [
+  {
+   "seed": 6000,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6001,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6002,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6003,
+   "success": true,
+   "cycles": 12
+  },
+  {
+   "seed": 6004,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6005,
+   "success": true,
+   "cycles": 19
+  },
+  {
+   "seed": 6006,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6007,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6008,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6009,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6010,
+   "success": true,
+   "cycles": 29
+  },
+  {
+   "seed": 6011,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6012,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6013,
+   "success": true,
+   "cycles": 23
+  },
+  {
+   "seed": 6014,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6015,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6016,
+   "success": true,
+   "cycles": 19
+  },
+  {
+   "seed": 6017,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6018,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6019,
+   "success": true,
+   "cycles": 12
+  },
+  {
+   "seed": 6020,
+   "success": true,
+   "cycles": 11
+  },
+  {
+   "seed": 6021,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6022,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6023,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6024,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6025,
+   "success": true,
+   "cycles": 32
+  },
+  {
+   "seed": 6026,
+   "success": true,
+   "cycles": 17
+  },
+  {
+   "seed": 6027,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6028,
+   "success": true,
+   "cycles": 45
+  },
+  {
+   "seed": 6029,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6030,
+   "success": true,
+   "cycles": 14
+  },
+  {
+   "seed": 6031,
+   "success": true,
+   "cycles": 15
+  },
+  {
+   "seed": 6032,
+   "success": true,
+   "cycles": 12
+  },
+  {
+   "seed": 6033,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6034,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6035,
+   "success": true,
+   "cycles": 40
+  },
+  {
+   "seed": 6036,
+   "success": true,
+   "cycles": 20
+  },
+  {
+   "seed": 6037,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6038,
+   "success": true,
+   "cycles": 10
+  },
+  {
+   "seed": 6039,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6040,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6041,
+   "success": true,
+   "cycles": 25
+  },
+  {
+   "seed": 6042,
+   "success": true,
+   "cycles": 35
+  },
+  {
+   "seed": 6043,
+   "success": true,
+   "cycles": 17
+  },
+  {
+   "seed": 6044,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6045,
+   "success": true,
+   "cycles": 28
+  },
+  {
+   "seed": 6046,
+   "success": false,
+   "cycles": 50
+  },
+  {
+   "seed": 6047,
+   "success": true,
+   "cycles": 11
+  },
+  {
+   "seed": 6048,
+   "success": true,
+   "cycles": 11
+  },
+  {
+   "seed": 6049,
+   "success": true,
+   "cycles": 47
+  }
+ ]
+}
