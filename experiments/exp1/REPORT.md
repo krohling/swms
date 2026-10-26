@@ -92,7 +92,9 @@ exp1b's ladder accumulates in `experiments/exp1b/` as training progresses
 (16k: bg 52 / by 58 / yr 40, agg 50.0 — base-level at 16k, like run4;
 42k: bg 58 / by 52 / yr 44, agg 51.3 — bg 58 is the first trained-arm point
 above base on bg, the training task; suite still ~3 behind exp1@42k, within
-noise).
+noise; 64k: bg 56 / by 54 / yr 54, agg 54.7 — ties exp1's best suite point,
+with the curve still rising at 64k where exp1's had rolled over, and yr 54
+the best yr from any trained arm).
 
 **Compose baseline** (exp2 step 1, `experiments/exp2/compose_exp1_final.json`,
 4,000 held-out v2-R10 cycles, stored-gate blend): exp1-final's per-question
