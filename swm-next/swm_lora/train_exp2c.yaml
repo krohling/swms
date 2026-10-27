@@ -1,0 +1,40 @@
+# Experiment 2c: planner-aligned selector, listwise soft-CE, COLD LoRA.
+# Ablation vs exp2a (Kevin, 2026-10-26): identical except NO LoRA warm start —
+# LoRA adapters start from peft's fresh init (B=0 => identity LM at step 0).
+# Trajectory adapter + candidate-index embeddings still init from the
+# selection warm-up (warmup_sel), so this tests whether the selection-warmed
+# encoder alone rescues cold LoRA from the run5 uniform-saddle collapse.
+# No exp1b artifact needed => queues with no dependency.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+k: 8
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear
+h5_paths: [datasets_swm/bg_hybrid_v2_k8_r10.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+val_frac: 0.05
+epochs: 3
+micro_lists: 4                 # 4 cycles/forward (1 image + 128 traj tokens each)
+accum_lists: 4                 # eff 16 cycles per opt step (run5b-proven on GH200)
+loss: listwise
+tau: 0.1                       # target softmax temp ~ 2x teacher JND (|dp| ~ 0.05)
+proj_hidden: 512
+traj_cumsum: true
+learnable_scale: false
+# init_adapters: (none)        # <- the ablation: LoRA adapters cold
+init_encoder: outputs_swm_lora/warmup_sel/ckpt_step6000 # selection-warmed projector+cand_embed
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_cycles: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp2c-selector-listwise-coldlora
+out_dir: outputs_swm_lora/exp2c_full
