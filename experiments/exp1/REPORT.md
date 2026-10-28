@@ -94,7 +94,21 @@ exp1b's ladder accumulates in `experiments/exp1b/` as training progresses
 above base on bg, the training task; suite still ~3 behind exp1@42k, within
 noise; 64k: bg 56 / by 54 / yr 54, agg 54.7 — ties exp1's best suite point,
 with the curve still rising at 64k where exp1's had rolled over, and yr 54
-the best yr from any trained arm).
+the best yr from any trained arm; final 80,367: bg 52 / by 70 / yr 42,
+agg 54.7).
+
+exp1b curve complete: 50.0 → 51.3 → 54.7 → 54.7. Where exp1 peaked at 42k
+and rolled over, exp1b plateaus at the same 54.7 ceiling — R10 filtering
+bought a later, flatter peak, not a higher one. The final point's
+composition is very different from 64k's balanced 56/54/54, though:
+**by 70 beats the teacher's 68 on that task** — the best single-task
+number from any trained arm this campaign, +14 over random's 56 (n=50,
+s.e. ~7, so directionally strong) — while yr gives back its 64k gain
+(54 → 42, back near controls) and bg slips to 52, below base 56. Same
+suite, opposite shape: late training concentrated the model's skill on
+one OOD task at the expense of the other two. Checkpoint selection
+matters again (64k is the more deployable point); the teacher's 64.7
+stays well clear of every trained arm.
 
 **Compose baseline** (exp2 step 1, `experiments/exp2/compose_exp1_final.json`,
 4,000 held-out v2-R10 cycles, stored-gate blend): exp1-final's per-question
