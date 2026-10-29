@@ -1,0 +1,186 @@
+
+================================================================================
+Configuration: ogbench/base_diffusion/blue_cube_green_cube
+Block combo: ('blue_cube', 'green_cube')
+Diffusion checkpoint: /Users/kevin/projects/research/semantic-world-modeling/workspace/swms/ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+Success rate: 24/50 (48.00%)
+Average time: 0.06 minutes
+Individual results:
+  Seed 6000: Success=0, Time=0.08 min
+  Seed 6001: Success=1, Time=0.03 min
+  Seed 6002: Success=1, Time=0.08 min
+  Seed 6003: Success=0, Time=0.08 min
+  Seed 6004: Success=0, Time=0.08 min
+  Seed 6005: Success=1, Time=0.04 min
+  Seed 6006: Success=0, Time=0.08 min
+  Seed 6007: Success=1, Time=0.02 min
+  Seed 6008: Success=1, Time=0.03 min
+  Seed 6009: Success=0, Time=0.08 min
+  Seed 6010: Success=0, Time=0.08 min
+  Seed 6011: Success=1, Time=0.02 min
+  Seed 6012: Success=1, Time=0.02 min
+  Seed 6013: Success=0, Time=0.08 min
+  Seed 6014: Success=0, Time=0.08 min
+  Seed 6015: Success=1, Time=0.02 min
+  Seed 6016: Success=1, Time=0.05 min
+  Seed 6017: Success=1, Time=0.03 min
+  Seed 6018: Success=0, Time=0.08 min
+  Seed 6019: Success=0, Time=0.08 min
+  Seed 6020: Success=1, Time=0.02 min
+  Seed 6021: Success=0, Time=0.08 min
+  Seed 6022: Success=1, Time=0.02 min
+  Seed 6023: Success=0, Time=0.08 min
+  Seed 6024: Success=1, Time=0.08 min
+  Seed 6025: Success=1, Time=0.02 min
+  Seed 6026: Success=1, Time=0.02 min
+  Seed 6027: Success=0, Time=0.08 min
+  Seed 6028: Success=0, Time=0.08 min
+  Seed 6029: Success=0, Time=0.08 min
+  Seed 6030: Success=0, Time=0.08 min
+  Seed 6031: Success=1, Time=0.02 min
+  Seed 6032: Success=1, Time=0.02 min
+  Seed 6033: Success=0, Time=0.08 min
+  Seed 6034: Success=0, Time=0.08 min
+  Seed 6035: Success=1, Time=0.03 min
+  Seed 6036: Success=1, Time=0.05 min
+  Seed 6037: Success=0, Time=0.08 min
+  Seed 6038: Success=1, Time=0.02 min
+  Seed 6039: Success=0, Time=0.08 min
+  Seed 6040: Success=0, Time=0.08 min
+  Seed 6041: Success=1, Time=0.04 min
+  Seed 6042: Success=0, Time=0.08 min
+  Seed 6043: Success=0, Time=0.08 min
+  Seed 6044: Success=0, Time=0.08 min
+  Seed 6045: Success=1, Time=0.03 min
+  Seed 6046: Success=0, Time=0.08 min
+  Seed 6047: Success=1, Time=0.02 min
+  Seed 6048: Success=1, Time=0.02 min
+  Seed 6049: Success=0, Time=0.08 min
+================================================================================
+
+================================================================================
+Configuration: ogbench/base_diffusion/blue_cube_yellow_cube
+Block combo: ('blue_cube', 'yellow_cube')
+Diffusion checkpoint: /Users/kevin/projects/research/semantic-world-modeling/workspace/swms/ckpts/ogbench_base_diffusion/blue_cube_yellow_cube.pt
+Success rate: 27/50 (54.00%)
+Average time: 0.05 minutes
+Individual results:
+  Seed 6000: Success=1, Time=0.03 min
+  Seed 6001: Success=1, Time=0.06 min
+  Seed 6002: Success=0, Time=0.08 min
+  Seed 6003: Success=1, Time=0.03 min
+  Seed 6004: Success=1, Time=0.02 min
+  Seed 6005: Success=0, Time=0.08 min
+  Seed 6006: Success=0, Time=0.08 min
+  Seed 6007: Success=0, Time=0.08 min
+  Seed 6008: Success=1, Time=0.03 min
+  Seed 6009: Success=0, Time=0.08 min
+  Seed 6010: Success=0, Time=0.08 min
+  Seed 6011: Success=0, Time=0.08 min
+  Seed 6012: Success=1, Time=0.02 min
+  Seed 6013: Success=0, Time=0.08 min
+  Seed 6014: Success=0, Time=0.08 min
+  Seed 6015: Success=1, Time=0.03 min
+  Seed 6016: Success=1, Time=0.02 min
+  Seed 6017: Success=0, Time=0.08 min
+  Seed 6018: Success=1, Time=0.03 min
+  Seed 6019: Success=0, Time=0.08 min
+  Seed 6020: Success=1, Time=0.02 min
+  Seed 6021: Success=0, Time=0.08 min
+  Seed 6022: Success=1, Time=0.03 min
+  Seed 6023: Success=0, Time=0.08 min
+  Seed 6024: Success=1, Time=0.04 min
+  Seed 6025: Success=1, Time=0.03 min
+  Seed 6026: Success=0, Time=0.08 min
+  Seed 6027: Success=1, Time=0.02 min
+  Seed 6028: Success=1, Time=0.02 min
+  Seed 6029: Success=0, Time=0.08 min
+  Seed 6030: Success=1, Time=0.02 min
+  Seed 6031: Success=1, Time=0.02 min
+  Seed 6032: Success=1, Time=0.03 min
+  Seed 6033: Success=0, Time=0.08 min
+  Seed 6034: Success=0, Time=0.08 min
+  Seed 6035: Success=1, Time=0.02 min
+  Seed 6036: Success=1, Time=0.05 min
+  Seed 6037: Success=0, Time=0.08 min
+  Seed 6038: Success=1, Time=0.02 min
+  Seed 6039: Success=0, Time=0.08 min
+  Seed 6040: Success=1, Time=0.03 min
+  Seed 6041: Success=1, Time=0.03 min
+  Seed 6042: Success=1, Time=0.02 min
+  Seed 6043: Success=1, Time=0.03 min
+  Seed 6044: Success=1, Time=0.03 min
+  Seed 6045: Success=0, Time=0.08 min
+  Seed 6046: Success=0, Time=0.08 min
+  Seed 6047: Success=0, Time=0.08 min
+  Seed 6048: Success=1, Time=0.04 min
+  Seed 6049: Success=0, Time=0.08 min
+================================================================================
+
+================================================================================
+Configuration: ogbench/base_diffusion/yellow_cube_red_cube
+Block combo: ('yellow_cube', 'red_cube')
+Diffusion checkpoint: /Users/kevin/projects/research/semantic-world-modeling/workspace/swms/ckpts/ogbench_base_diffusion/yellow_cube_red_cube.pt
+Success rate: 22/50 (44.00%)
+Average time: 0.06 minutes
+Individual results:
+  Seed 6000: Success=1, Time=0.02 min
+  Seed 6001: Success=1, Time=0.03 min
+  Seed 6002: Success=1, Time=0.02 min
+  Seed 6003: Success=0, Time=0.08 min
+  Seed 6004: Success=0, Time=0.08 min
+  Seed 6005: Success=1, Time=0.03 min
+  Seed 6006: Success=0, Time=0.08 min
+  Seed 6007: Success=1, Time=0.03 min
+  Seed 6008: Success=0, Time=0.08 min
+  Seed 6009: Success=0, Time=0.08 min
+  Seed 6010: Success=1, Time=0.02 min
+  Seed 6011: Success=1, Time=0.02 min
+  Seed 6012: Success=1, Time=0.02 min
+  Seed 6013: Success=1, Time=0.02 min
+  Seed 6014: Success=0, Time=0.08 min
+  Seed 6015: Success=0, Time=0.08 min
+  Seed 6016: Success=0, Time=0.08 min
+  Seed 6017: Success=1, Time=0.05 min
+  Seed 6018: Success=0, Time=0.08 min
+  Seed 6019: Success=1, Time=0.02 min
+  Seed 6020: Success=0, Time=0.08 min
+  Seed 6021: Success=0, Time=0.08 min
+  Seed 6022: Success=1, Time=0.03 min
+  Seed 6023: Success=0, Time=0.08 min
+  Seed 6024: Success=0, Time=0.08 min
+  Seed 6025: Success=0, Time=0.08 min
+  Seed 6026: Success=0, Time=0.08 min
+  Seed 6027: Success=0, Time=0.08 min
+  Seed 6028: Success=1, Time=0.02 min
+  Seed 6029: Success=0, Time=0.08 min
+  Seed 6030: Success=0, Time=0.08 min
+  Seed 6031: Success=0, Time=0.08 min
+  Seed 6032: Success=1, Time=0.02 min
+  Seed 6033: Success=1, Time=0.07 min
+  Seed 6034: Success=1, Time=0.02 min
+  Seed 6035: Success=1, Time=0.03 min
+  Seed 6036: Success=0, Time=0.08 min
+  Seed 6037: Success=0, Time=0.08 min
+  Seed 6038: Success=0, Time=0.08 min
+  Seed 6039: Success=0, Time=0.08 min
+  Seed 6040: Success=1, Time=0.02 min
+  Seed 6041: Success=0, Time=0.08 min
+  Seed 6042: Success=0, Time=0.08 min
+  Seed 6043: Success=0, Time=0.08 min
+  Seed 6044: Success=0, Time=0.08 min
+  Seed 6045: Success=1, Time=0.07 min
+  Seed 6046: Success=0, Time=0.08 min
+  Seed 6047: Success=1, Time=0.02 min
+  Seed 6048: Success=1, Time=0.03 min
+  Seed 6049: Success=1, Time=0.02 min
+================================================================================
+
+################################################################################
+OVERALL SUMMARY (all tasks)
+################################################################################
+  blue_cube -> green_cube: 24/50 (48.00%), avg 0.06 min
+  blue_cube -> yellow_cube: 27/50 (54.00%), avg 0.05 min
+  yellow_cube -> red_cube: 22/50 (44.00%), avg 0.06 min
+TOTAL: 73/150 (48.67%), avg 0.06 min
+################################################################################
