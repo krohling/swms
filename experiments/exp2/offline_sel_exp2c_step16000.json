@@ -1,0 +1,14 @@
+{
+ "ckpt": "outputs_swm_lora_local/exp2c_ckpt_step16000",
+ "h5": "datasets_swm/bg_hybrid_v2_k8_r10.h5",
+ "cycles": 4000,
+ "gate": "stored",
+ "rho": 0.17431687489951486,
+ "rho_informative": 0.17521448521980537,
+ "rho_informative_n": 3212,
+ "top1_agree": 0.2325653798256538,
+ "top1_regret": 0.1975795583436535,
+ "informative_n": 3212,
+ "pair_acc10": 0.5950206017258804,
+ "pair_n": 51452
+}
