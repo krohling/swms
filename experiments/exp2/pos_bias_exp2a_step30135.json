@@ -1,0 +1,39 @@
+{
+ "ckpt": "outputs_swm_lora_local/exp2a_ckpt_step30135",
+ "h5": "datasets_swm/bg_hybrid_v2_k8_r10.h5",
+ "cycles": 2000,
+ "k": 8,
+ "perm_seed": 1234,
+ "pick_rate_stored_pct": [
+  6.7,
+  13.2,
+  12.3,
+  10.5,
+  10.0,
+  9.3,
+  14.2,
+  23.8
+ ],
+ "pick_rate_shuffled_slot_pct": [
+  13.1,
+  14.5,
+  14.4,
+  13.2,
+  11.7,
+  11.8,
+  10.8,
+  10.5
+ ],
+ "teacher_argmax_rate_pct": [
+  9.0,
+  12.8,
+  12.1,
+  12.4,
+  10.8,
+  12.3,
+  13.0,
+  17.7
+ ],
+ "candidate_consistency": 0.77,
+ "chance_pct": 12.5
+}
