@@ -3,7 +3,8 @@
 # trivial. The most robot-faithful collection: propose one chunk, execute it,
 # label what you executed. tau=1.0 deliberately, never the ladder's k=1
 # degenerate tau=0 (deterministic mean path — the 2026-10-29 base re-anchor
-# lesson). 1 label/cycle; judge budget/cycle = 3 p_yes (app, place, gate).
+# lesson). 1 label/cycle; judge budget/cycle = 3 p_yes (app, place, gate)
+# in one batched forward.
 device: mps                    # LARG/Vista override to cuda
 seed_start: 42000              # v3a range 42000-47999. Taken elsewhere: 6000-6099
                                # eval / 10000-10799 k16 / 12000-22799 k1_exec /

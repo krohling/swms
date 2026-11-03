@@ -7,7 +7,9 @@ the sim env but adopts the robot's information diet: per cycle, ONE candidate
 is picked (uniformly — logged propensity), rolled out `lookahead` steps for its
 judge label, then the env rewinds and the usual `actions_per_cycle` actions of
 that same candidate are executed. One label per cycle (plus the frame_t gate
-probe, which a robot labeler could also produce — frame_t is a real frame).
+probe, which a robot labeler could also produce — frame_t is a real frame);
+all judge probes of a cycle run as ONE batched forward (verified
+bit-identical to sequential single-image calls, 2026-11-02 A/B).
 
 Collection design = (k proposals, temperature schedule, pick rule):
   v3a  k=1, fixed tau=1.0   solo standard-sampling proposal (NOT the ladder's
@@ -66,7 +68,7 @@ from swm.constants import ANSWER_OPTIONS
 from swm.diffusion_policy import DiffusionPolicy
 from swm.utils.goal_generators import get_ogbench_goal
 
-from datagen import GATE_ALPHA, HOLD_W, PLACE_W, ask, jpeg  # noqa: E402
+from datagen import GATE_ALPHA, HOLD_W, PLACE_W, jpeg  # noqa: E402
 from mpc import build_questions, make_env  # noqa: E402  (same dir)
 
 
@@ -79,7 +81,7 @@ def proposal_temps(schedule, k, fixed_temp):
 
 
 def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
-                q_hold, seed, arm, k, temps, lookahead, batch):
+                q_hold, seed, arm, k, temps, lookahead):
     torch.manual_seed(hash((seed, "mpc")) % 2**31)
     np.random.seed(hash(("mpc", seed)) % 2**31)
     rng = np.random.RandomState(seed)          # pick RNG (same as v1 random)
@@ -123,17 +125,22 @@ def run_episode(h5, env, goal, judge, policy_path, cfg, q_app, q_place,
                                   for k2, v in env.get_state().items()})
         env.set_state(saved)
 
-        # labels for the ONE executed candidate (hold == approach by default:
-        # asked once, stored twice for schema stability, as in v1)
-        p_app = ask(judge, [end_frame], q_app, batch)
-        p_place = ask(judge, [end_frame], q_place, batch)
-        p_hold = p_app if q_hold == q_app else ask(judge, [end_frame],
-                                                   q_hold, batch)
-
-        # gate probe on frame_t (a real frame — robot-labelable) + blended
-        # score of the executed candidate; kept so the v2 score semantics
-        # stay computable per cycle
-        rg = float(judge.p_yes([frame_t], [q_hold])[0][0])
+        # all of the cycle's labels in ONE batched judge forward: approach +
+        # place on the executed rollout end frame, gate probe (q_hold) on
+        # frame_t (a real frame — robot-labelable). p_yes builds per-pair
+        # prompts and reads each sequence's own last real token under right
+        # padding — verified bit-identical to sequential single-image calls
+        # (2026-11-02 A/B on smoke frames, max |dp| = 0.0).
+        if q_hold == q_app:
+            p, _ = judge.p_yes([end_frame, end_frame, frame_t],
+                               [q_app, q_place, q_hold])
+            p_app, p_place = p[0:1], p[1:2]
+            p_hold, rg = p_app, float(p[2])
+        else:
+            p, _ = judge.p_yes([end_frame, end_frame, end_frame, frame_t],
+                               [q_app, q_place, q_hold, q_hold])
+            p_app, p_place, p_hold = p[0:1], p[1:2], p[2:3]
+            rg = float(p[3])
         gate_ema = rg if gate_ema is None else \
             GATE_ALPHA * rg + (1 - GATE_ALPHA) * gate_ema
         g = gate_ema
@@ -226,7 +233,6 @@ def main():
     arm = (f"v3_k{args.k}_" +
            (f"tau{args.fixed_temp:g}" if args.temp_schedule == "fixed"
             else "ladder") + "_uniform")
-    batch = int(cfg.get("batch", 8))
 
     from label_teacher import QwenJudge
     judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"])
@@ -263,8 +269,7 @@ def main():
                 continue
             success, cycles = run_episode(
                 h5, env, goal, judge, cfg["diffusion_path"], cfg, q_app,
-                q_place, q_hold, seed, arm, args.k, temps, args.lookahead,
-                batch)
+                q_place, q_hold, seed, arm, args.k, temps, args.lookahead)
             wins += success
             print(f"[{i+1}/{args.episodes}] seed {seed} ({arm}): "
                   f"{'success' if success else 'fail'} @ {cycles} "
