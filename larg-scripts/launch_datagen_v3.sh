@@ -20,6 +20,17 @@ awk -v c="$CORES" -v l="$LOAD" 'BEGIN{exit !(l < c/2)}' || { echo "host load $LO
 FREE_GB=$(df -BG --output=avail /scratch/cluster/krohling | tail -1 | tr -dc '0-9')
 FLOOR_GB=${FREE_FLOOR_GB:-10}
 [ "$FREE_GB" -ge "$FLOOR_GB" ] || { echo "scratch only ${FREE_GB}G free (floor ${FLOOR_GB}G) — refusing"; exit 1; }
+# Kevin 2026-11-02: placing a job must leave >=1 free GPU on the machine
+# for other users (free = <1GB used and <5% util).
+NGPU=$(nvidia-smi -L | wc -l)
+FREE_OTHERS=0
+for g in $(seq 0 $((NGPU-1))); do
+  [ "$g" -eq "$GPU" ] && continue
+  mu=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i $g)
+  ut=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits -i $g)
+  [ "$mu" -lt 1024 ] && [ "$ut" -lt 5 ] && FREE_OTHERS=$((FREE_OTHERS+1))
+done
+[ "$FREE_OTHERS" -ge 1 ] || { echo "GPU $GPU would leave 0 free GPUs on this host — refusing (keep >=1 open)"; exit 1; }
 W=/scratch/cluster/krohling/swms-exp1
 cd $W
 [ -f swm-next/verifier/datagen_v3.py ] || { echo "checkout missing datagen_v3.py — checkout branch pointwise-k1 first"; exit 1; }
