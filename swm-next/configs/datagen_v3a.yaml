@@ -1,0 +1,24 @@
+# v3a dataset recipe (pointwise-k1 campaign, arm A — team exp4a training data):
+# solo proposal at STANDARD sampling — k=1, fixed tau=1.0, uniform pick is
+# trivial. The most robot-faithful collection: propose one chunk, execute it,
+# label what you executed. tau=1.0 deliberately, never the ladder's k=1
+# degenerate tau=0 (deterministic mean path — the 2026-10-29 base re-anchor
+# lesson). 1 label/cycle; judge budget/cycle = 3 p_yes (app, place, gate).
+device: mps                    # LARG/Vista override to cuda
+seed_start: 42000              # v3a range 42000-47999. Taken elsewhere: 6000-6099
+                               # eval / 10000-10799 k16 / 12000-22799 k1_exec /
+                               # 30000-35399 v1 hybrid / 40000-40999 extra hybrid
+                               # shard / 50000-56499 v2 / 60000+ v3b / 90000+ smoke
+block_combo: [blue_cube, green_cube]
+diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+max_cycles: 50
+actions_per_cycle: 4
+arm_alpha: 0.1
+model_id: Qwen/Qwen3-VL-8B-Instruct
+batch: 8
+
+generation:
+  k: 1
+  lookahead: 16
+  temp_schedule: fixed
+  fixed_temp: 1.0

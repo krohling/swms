@@ -1,0 +1,23 @@
+# v3b dataset recipe (pointwise-k1 campaign, arm B — team exp4b training data):
+# deployment's proposal distribution, robot-plausible exploration — k=8 on the
+# eval temperature ladder (temps = i*2.0/7, same as eval_closed_loop; NO
+# min_sep rejection — eval has none), UNIFORM pick (logged propensity 1/8),
+# execute + label only the picked candidate. Same 1 label/cycle budget as v3a;
+# extra cost over v3a is proposal sampling only (8 diffusion draws vs 1).
+device: mps                    # LARG/Vista override to cuda
+seed_start: 60000              # v3b range 60000-65999. Taken elsewhere: 6000-6099
+                               # eval / 10000-10799 k16 / 12000-22799 k1_exec /
+                               # 30000-35399 v1 hybrid / 40000-40999 extra hybrid
+                               # shard / 42000+ v3a / 50000-56499 v2 / 90000+ smoke
+block_combo: [blue_cube, green_cube]
+diffusion_path: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+max_cycles: 50
+actions_per_cycle: 4
+arm_alpha: 0.1
+model_id: Qwen/Qwen3-VL-8B-Instruct
+batch: 8
+
+generation:
+  k: 8
+  lookahead: 16
+  temp_schedule: ladder
