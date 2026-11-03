@@ -31,6 +31,7 @@ cat > $W/run_dgv3${ARM}_${SS}.sh <<INNER
 #!/bin/bash
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES=$GPU
+export MUJOCO_EGL_DEVICE_ID=$GPU
 export HF_HUB_CACHE=/scratch/cluster/krohling/hf_cache
 export HF_HUB_OFFLINE=1
 export PYTHONPATH=$W:$W/swm-next
