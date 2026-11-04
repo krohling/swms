@@ -6,9 +6,11 @@
 #SBATCH -t 48:00:00
 #SBATCH -o %x-%j.out
 # Experiment 4a: exp1 recipe on the v3a k=1 tau=1 dataset (train_exp4a.yaml).
-# ~47k steps expected — one 48h leg should finish comfortably; submit a leg-2
-# with --dependency=afterany:<leg1> as crash/walltime insurance (same script;
-# --resume auto resumes, and the DONE guard no-ops a redundant leg-2).
+# ~91k steps expected (2 planner questions/cycle; see train_exp4a.yaml) but
+# k=1 single-candidate steps are ~8x lighter than exp1's 8-lists, so one 48h
+# leg should still cover it; submit a leg-2 with --dependency=afterany:<leg1>
+# as crash/walltime insurance (same script; --resume auto resumes, and the
+# DONE guard no-ops a redundant leg-2).
 # Runs from the pointwise-k1 harness checkout $WORK/swm-followup/swms-exp4.
 # Staging pre-reqs (verified by the guards below): the v3a HDF5 in
 # datasets_swm/, exp1's warm-up projector ckpt and the diffusion ckpt copied

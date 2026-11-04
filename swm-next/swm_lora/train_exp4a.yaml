@@ -3,8 +3,9 @@
 # Single variable vs exp1: the dataset. Everything else (LoRA geometry, warm
 # start, schedule) is exp1's. Trainer is pointwise soft-BCE and k=1-safe;
 # within-cycle Spearman val metric is degenerate at k=1 (ignore it here).
-# Steps: ~189k cycles x 3 epochs / 12 cycles-per-step ~ 47k (vs exp1's 84k:
-# k=1 cycles are single candidates, not 8-lists).
+# Steps: ~366k train lists (192.6k cycles x 2 planner questions, 95% split)
+# x 3 epochs / 12 lists-per-step ~ 91.5k (exp1: 84k). Each k=1 list is a
+# single candidate, not an 8-list, so steps are ~8x lighter than exp1's.
 # Pre-registered success gate (team-exp4): peak block-A suite within ~1 s.e.
 # (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a block-B leg.
 model_id: Qwen/Qwen3-VL-8B-Instruct
