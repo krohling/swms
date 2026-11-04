@@ -1,0 +1,41 @@
+# Experiment 4a: exp1's exact recipe on the v3a robot-faithful k=1 dataset
+# (execute-and-label-one, tau=1.0, seeds 42000+, collected m5 2026-11-02/04).
+# Single variable vs exp1: the dataset. Everything else (LoRA geometry, warm
+# start, schedule) is exp1's. Trainer is pointwise soft-BCE and k=1-safe;
+# within-cycle Spearman val metric is degenerate at k=1 (ignore it here).
+# Steps: ~189k cycles x 3 epochs / 12 cycles-per-step ~ 47k (vs exp1's 84k:
+# k=1 cycles are single candidates, not 8-lists).
+# Pre-registered success gate (team-exp4): peak block-A suite within ~1 s.e.
+# (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a block-B leg.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_v3a_k1tau1_s42000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+proj_init_scale: 0.1
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/exp1_warmup_larg/ckpt_step1500   # exp1's warm
+                 # start, unchanged — constant across exp1/exp4a/exp4b so the
+                 # dataset stays the only moving part
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp4a-v3a-k1tau1
+out_dir: outputs_swm_lora/exp4a_full

@@ -1,0 +1,37 @@
+# Experiment 4b: exp1's exact recipe on the v3b dataset (k=8 eval-temperature
+# ladder, uniform pick, execute-and-label-the-pick; seeds 60000+, collected m5
+# 2026-11-02/04). Training view is the executed candidate only (k=1 on disk),
+# so config is identical to exp4a except the dataset. The k=8 proposal context
+# + pick/propensity live in v3-only extras for later off-policy work.
+# See train_exp4a.yaml for schedule notes and the pre-registered success gate.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_v3b_k8uni_s60000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+proj_init_scale: 0.1
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/exp1_warmup_larg/ckpt_step1500   # exp1's warm
+                 # start, unchanged (see exp4a note)
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp4b-v3b-k8uni
+out_dir: outputs_swm_lora/exp4b_full
