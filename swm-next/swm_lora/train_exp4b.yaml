@@ -21,8 +21,8 @@ accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
 proj_init_scale: 0.1
 proj_hidden: 512
 traj_cumsum: true
-init_projector: outputs_swm_lora/exp1_warmup_larg/ckpt_step1500   # exp1's warm
-                 # start, unchanged (see exp4a note)
+# init_projector intentionally UNSET (Kevin, 2026-11-04; see exp4a note):
+# fresh trajectory adapter, trains on v3b only.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0

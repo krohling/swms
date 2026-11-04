@@ -13,8 +13,8 @@
 # DONE guard no-ops a redundant leg-2).
 # Runs from the pointwise-k1 harness checkout $WORK/swm-followup/swms-exp4.
 # Staging pre-reqs (verified by the guards below): the v3a HDF5 in
-# datasets_swm/, exp1's warm-up projector ckpt and the diffusion ckpt copied
-# from swms-exp1.
+# datasets_swm/ and the diffusion ckpt copied from swms-exp1. The trajectory
+# adapter initializes FRESH (Kevin 2026-11-04) — no warm-up ckpt needed.
 set -x
 W=$WORK/swm-followup/swms-exp4
 V=$WORK/swm-followup/swms-lt/.venv
@@ -26,7 +26,6 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 source $WORK/swm-followup/.wandb_env
 export WANDB_DATA_DIR=$WORK/wandb_data
 [ -f $W/datasets_swm/bg_v3a_k1tau1_s42000.h5 ] || { echo INIT_MISSING_V3A_H5; exit 1; }
-[ -f $W/outputs_swm_lora/exp1_warmup_larg/ckpt_step1500/projector.pt ] || { echo INIT_MISSING_WARMUP_PROJECTOR; exit 1; }
 [ -f $W/ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt ] || { echo INIT_MISSING_DIFFUSION_CKPT; exit 1; }
 $V/bin/python swm-next/swm_lora/train_exp1.py --config swm-next/swm_lora/train_exp4a.yaml --resume auto || { echo TRAIN_JOB_FAILED; exit 1; }
 echo TRAIN_JOB_DONE

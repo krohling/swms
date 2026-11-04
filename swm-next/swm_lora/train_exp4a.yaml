@@ -1,8 +1,10 @@
-# Experiment 4a: exp1's exact recipe on the v3a robot-faithful k=1 dataset
-# (execute-and-label-one, tau=1.0, seeds 42000+, collected m5 2026-11-02/04).
-# Single variable vs exp1: the dataset. Everything else (LoRA geometry, warm
-# start, schedule) is exp1's. Trainer is pointwise soft-BCE and k=1-safe;
-# within-cycle Spearman val metric is degenerate at k=1 (ignore it here).
+# Experiment 4a: exp1's recipe on the v3a robot-faithful k=1 dataset
+# (execute-and-label-one, tau=1.0, seeds 42000+, collected m5 2026-11-02/04),
+# with a FRESH trajectory adapter (Kevin, 2026-11-04): no init from any
+# existing checkpoint. NB vs exp1 this varies BOTH the dataset and the
+# warm-start (exp1's lift was the confounded all-linear x warm-up bundle);
+# the control comparison in the gate is unaffected. Trainer is pointwise
+# soft-BCE and k=1-safe; within-cycle Spearman val is degenerate at k=1.
 # Steps: ~366k train lists (192.6k cycles x 2 planner questions, 95% split)
 # x 3 epochs / 12 lists-per-step ~ 91.5k (exp1: 84k). Each k=1 list is a
 # single candidate, not an 8-list, so steps are ~8x lighter than exp1's.
@@ -25,9 +27,8 @@ accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
 proj_init_scale: 0.1
 proj_hidden: 512
 traj_cumsum: true
-init_projector: outputs_swm_lora/exp1_warmup_larg/ckpt_step1500   # exp1's warm
-                 # start, unchanged — constant across exp1/exp4a/exp4b so the
-                 # dataset stays the only moving part
+# init_projector intentionally UNSET (Kevin, 2026-11-04): the trajectory
+# adapter initializes fresh (proj_init_scale below) and trains on v3a only.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
