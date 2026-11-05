@@ -21,8 +21,12 @@ accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
 learnable_scale: false         # fixed 1x tokens (exp1b standard; see exp4a)
 proj_hidden: 512
 traj_cumsum: true
-# init_projector: set to the v3b noscale warmup plateau ckpt when wu4b lands
-# (outputs_swm_lora/exp4b_warmup_v3b/ckpt_stepN); job held until then.
+init_projector: outputs_swm_lora/exp4b_warmup_v3b/ckpt_step5250
+# ^ wu4b (1124071) val-BCE argmin over saved ckpts: 0.5629 @ 5250 (5000: 0.5655,
+# 4250: 0.5709 — within noise). Smoothed tail TURNED UP after ~5250 (7-pt mean
+# 0.570 @ 5150 -> 0.578 @ wall), so the extend-if-falling rule did NOT trigger;
+# no ext leg. Val level ~0.56 vs wu4a's ~0.40 reflects v3b's harder labels
+# (k=8 uniform pick), not adapter quality. Picked 2026-11-05.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
