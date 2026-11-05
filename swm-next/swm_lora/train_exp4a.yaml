@@ -24,11 +24,14 @@ val_frac: 0.05
 epochs: 3
 micro_cycles: 2
 accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
-proj_init_scale: 0.1
+learnable_scale: false         # fixed 1x tokens, no scalar gain — post-exp1
+                               # standard (exp1b/exp2*); matches the noscale
+                               # warm-up checkpoints. proj_init_scale removed:
+                               # dead when the scale is a fixed buffer.
 proj_hidden: 512
 traj_cumsum: true
 # init_projector intentionally UNSET (Kevin, 2026-11-04): the trajectory
-# adapter initializes fresh (proj_init_scale below) and trains on v3a only.
+# adapter initializes fresh (default MLP init, fixed 1x) and trains on v3a only.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0

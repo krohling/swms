@@ -18,7 +18,7 @@ val_frac: 0.05
 epochs: 3
 micro_cycles: 2
 accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
-proj_init_scale: 0.1
+learnable_scale: false         # fixed 1x tokens, no scalar gain (see exp4a note)
 proj_hidden: 512
 traj_cumsum: true
 # init_projector intentionally UNSET (Kevin, 2026-11-04; see exp4a note):
