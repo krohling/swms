@@ -9,8 +9,7 @@
 # negative; watch for earlier val-gap opening at r32.
 # (Letters c/d were briefly drafted 2026-11-05 for noscale twin arms, folded
 # into a/b the same day, never run; reused here for the capacity arms.)
-# PREPARED 2026-11-05, NOT YET SUBMITTED (pending Kevin's go).
-# init_projector: same ckpt as exp4a — set when wu4a's plateau is picked.
+# Submitted 2026-11-05 with exp4a's picked warm-up ckpt (wu4a, step 5500).
 model_id: Qwen/Qwen3-VL-8B-Instruct
 action_dim: 5
 horizon: 16
@@ -28,6 +27,7 @@ accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
 learnable_scale: false         # fixed 1x tokens (exp1b standard): no gain
 proj_hidden: 512
 traj_cumsum: true
+init_projector: outputs_swm_lora/exp4a_warmup_v3a/ckpt_step5500   # = exp4a's
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0

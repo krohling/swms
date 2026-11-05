@@ -14,7 +14,10 @@
 # Runs from the pointwise-k1 harness checkout $WORK/swm-followup/swms-exp4.
 # Staging pre-reqs (verified by the guards below): the v3a HDF5 in
 # datasets_swm/ and the diffusion ckpt copied from swms-exp1. The trajectory
-# adapter initializes FRESH (Kevin 2026-11-04) — no warm-up ckpt needed.
+# adapter warm-starts from wu4a's picked noscale ckpt via train_exp4a.yaml's
+# init_projector (set 2026-11-05). NB: the QUEUED 1121074 snapshot of this
+# script still guards on the staged exp1_warmup_larg ckpt — keep that staged
+# until the job starts (configs are runtime-read; the snapshot guard is not).
 set -x
 W=$WORK/swm-followup/swms-exp4
 V=$WORK/swm-followup/swms-lt/.venv

@@ -29,8 +29,11 @@ learnable_scale: false         # fixed 1x tokens (exp1b standard): no gain;
                                # matches the noscale warm-up it loads.
 proj_hidden: 512
 traj_cumsum: true
-# init_projector: set to the v3a noscale warmup plateau ckpt when wu4a lands
-# (outputs_swm_lora/exp4a_warmup_v3a/ckpt_stepN); job held until then.
+init_projector: outputs_swm_lora/exp4a_warmup_v3a/ckpt_step5500
+# ^ wu4a (1124070) val-BCE argmin over saved ckpts: 0.4071 @ 5500 (4250:
+# 0.4090, 4500: 0.4095 — all within noise). Curve flat from ~3000 in a
+# 0.40-0.42 band, so the extend-if-falling rule did NOT trigger; no ext leg.
+# Picked 2026-11-05.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
