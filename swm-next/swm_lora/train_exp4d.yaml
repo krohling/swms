@@ -1,0 +1,35 @@
+# Experiment 4d: exp4b's data (v3b) with the NOSCALE adapter treatment
+# (exp1b standard). Paired ablation for exp4b; see train_exp4c.yaml for the
+# design rationale. Primary comparison is exp4b vs exp4d.
+# PREPARED 2026-11-05, NOT YET SUBMITTED (pending Kevin's go).
+# init_projector: set to the v3b noscale warmup plateau (wu4b) at
+# submission: outputs_swm_lora/exp4b_warmup_v3b/ckpt_stepN.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_v3b_k8uni_s60000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+learnable_scale: false         # fixed 1x tokens (exp1b standard): no gain
+proj_hidden: 512
+traj_cumsum: true
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp4d-v3b-k8uni-noscale
+out_dir: outputs_swm_lora/exp4d_full
