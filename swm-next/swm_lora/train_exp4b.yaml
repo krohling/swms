@@ -18,13 +18,11 @@ val_frac: 0.05
 epochs: 3
 micro_cycles: 2
 accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
-proj_init_scale: 0.1
-learnable_scale: true          # exp1's scaled treatment (see exp4a note);
-                               # the matched noscale arm is exp4d.
+learnable_scale: false         # fixed 1x tokens (exp1b standard; see exp4a)
 proj_hidden: 512
 traj_cumsum: true
-# init_projector: set to the v3b SCALED warmup plateau ckpt when wu4bs lands
-# (outputs_swm_lora/exp4b_warmup_v3b_scaled/ckpt_stepN); job held until then.
+# init_projector: set to the v3b noscale warmup plateau ckpt when wu4b lands
+# (outputs_swm_lora/exp4b_warmup_v3b/ckpt_stepN); job held until then.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0

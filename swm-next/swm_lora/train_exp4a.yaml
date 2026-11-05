@@ -1,9 +1,10 @@
 # Experiment 4a: exp1's recipe on the v3a robot-faithful k=1 dataset
 # (execute-and-label-one, tau=1.0, seeds 42000+, collected m5 2026-11-02/04),
-# with exp1's EXACT adapter treatment (Kevin, 2026-11-05): scaled warm-up on
-# v3a + learnable gain in the main run (exp1's loaded ckpt carried scale
-# 0.1045 and settled ~0.090 by 42k) — so vs exp1 only the dataset varies.
-# The noscale ablation on the same data is exp4c. Trainer is pointwise
+# with the NOSCALE adapter treatment (Kevin, 2026-11-05 final): no-scale
+# warm-up on v3a + fixed-1x gain in the main run — exp1b's exact recipe, the
+# post-deep-eval standard (scaling already ablated: deep eval 2026-10-23
+# noscale won every offline metric; exp1b tied exp1 closed-loop). Clean
+# anchor: vs exp1b only the dataset varies (v2 -> v3a). Trainer is pointwise
 # soft-BCE and k=1-safe; within-cycle Spearman val is degenerate at k=1.
 # Steps: ~366k train lists (192.6k cycles x 2 planner questions, 95% split)
 # x 3 epochs / 12 lists-per-step ~ 91.5k (exp1: 84k). Each k=1 list is a
@@ -24,14 +25,12 @@ val_frac: 0.05
 epochs: 3
 micro_cycles: 2
 accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
-proj_init_scale: 0.1
-learnable_scale: true          # exp1's scaled treatment: learnable gain, kept
-                               # trainable in the main run. The matched noscale
-                               # arm (exp1b treatment) is exp4c.
+learnable_scale: false         # fixed 1x tokens (exp1b standard): no gain;
+                               # matches the noscale warm-up it loads.
 proj_hidden: 512
 traj_cumsum: true
-# init_projector: set to the v3a SCALED warmup plateau ckpt when wu4as lands
-# (outputs_swm_lora/exp4a_warmup_v3a_scaled/ckpt_stepN); job held until then.
+# init_projector: set to the v3a noscale warmup plateau ckpt when wu4a lands
+# (outputs_swm_lora/exp4a_warmup_v3a/ckpt_stepN); job held until then.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
