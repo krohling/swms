@@ -1,0 +1,34 @@
+# Experiment 4d: exp4b (v3b, exp1b recipe) at DOUBLE LoRA capacity — r32/a64.
+# See train_exp4c.yaml for the capacity-probe rationale; this is the v3b arm.
+# Shares exp4b's noscale warm-up checkpoint (projector-only, rank-agnostic).
+# PREPARED 2026-11-05, NOT YET SUBMITTED (pending Kevin's go).
+# init_projector: same ckpt as exp4b — set when wu4b's plateau is picked.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~90M trainable at r32)
+h5_paths: [datasets_swm/bg_v3b_k8uni_s60000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+learnable_scale: false         # fixed 1x tokens (exp1b standard): no gain
+proj_hidden: 512
+traj_cumsum: true
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp4d-v3b-r32
+out_dir: outputs_swm_lora/exp4d_full

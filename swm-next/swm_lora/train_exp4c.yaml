@@ -1,0 +1,42 @@
+# Experiment 4c: exp4a (v3a, exp1b recipe) at DOUBLE LoRA capacity — r32/a64,
+# alpha/r held at 2 so effective LoRA scaling matches a/b; ~90M trainable vs
+# ~45M at r16. Same data and the SAME noscale warm-up checkpoint as exp4a
+# (the warm-up trains only the projector — no LoRA exists in that stage — so
+# it is rank-agnostic and shared deliberately). Single-knob capacity probe:
+# everything but lora_r/lora_alpha identical to train_exp4a.yaml. Rank has
+# never been ablated in this lineage (r16 constant run4 -> exp1 -> exp1b).
+# Prior context: the OGB-era capacity probe (different architecture) was
+# negative; watch for earlier val-gap opening at r32.
+# (Letters c/d were briefly drafted 2026-11-05 for noscale twin arms, folded
+# into a/b the same day, never run; reused here for the capacity arms.)
+# PREPARED 2026-11-05, NOT YET SUBMITTED (pending Kevin's go).
+# init_projector: same ckpt as exp4a — set when wu4a's plateau is picked.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~90M trainable at r32)
+h5_paths: [datasets_swm/bg_v3a_k1tau1_s42000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+learnable_scale: false         # fixed 1x tokens (exp1b standard): no gain
+proj_hidden: 512
+traj_cumsum: true
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 200
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp4c-v3a-r32
+out_dir: outputs_swm_lora/exp4c_full
