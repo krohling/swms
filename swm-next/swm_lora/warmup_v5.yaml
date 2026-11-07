@@ -6,12 +6,12 @@
 # fixed LR; pick the val-BCE-plateau checkpoint and point train_exp5a.yaml's
 # init_projector at it (submit exp5a ONLY at pick-lock — never hold a queued
 # job, see memory 2026-11-07).
-# v5-specific: positives are sparse (~4% blue-on-green place, ~8% grasp per
-# window), so (a) balance_labels draws 50/50 classes per question (Jacob's
-# MultiHorizonSWMDataset recipe) and (b) the pick is judged on
-# val_bce_balanced (mean of the per-class BCEs), not plain val_bce, which a
-# base-rate predictor can minimize. val lists raised to 600 for the same
-# reason (~25-50 positives per pass).
+# v5-specific: simulator truth is sparse (~4.7% blue-on-green, ~7.8% grasped
+# per window) but the JUDGE's labels are not (~21% place / ~23% approach at
+# p>0.5; smoke 2026-11-07), so balance_labels stays OFF (one variable vs
+# wu4a; the option is implemented for a follow-up). Pick on plain val BCE as
+# for wu4a; val_bce_balanced / pos_frac are logged alongside as a sparsity
+# check. val lists raised to 600 for a less noisy pick.
 model_id: Qwen/Qwen3-VL-8B-Instruct
 action_dim: 5
 horizon: 16
@@ -24,7 +24,7 @@ accum_cycles: 6                # eff 12 lists/step, exp1 geometry
 learnable_scale: false         # winning noscale recipe: no scalar, tokens at 1x
 proj_hidden: 512
 traj_cumsum: true
-balance_labels: true           # per-question 50/50 (p>0.5) class sampling
+balance_labels: false          # OFF: one variable vs wu4a (see header)
 balance_threshold: 0.5
 learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
 max_steps: 6000
@@ -35,5 +35,5 @@ ckpt_every: 250
 seed: 0
 device: cuda
 wandb_project: swm-lora
-run_name: warmup-v5-noscale-balanced
+run_name: warmup-v5-noscale
 out_dir: outputs_swm_lora/exp5a_warmup_v5

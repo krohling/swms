@@ -265,6 +265,8 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--batch", type=int, default=None, help="judge probes per forward")
     ap.add_argument("--limit", type=int, default=0, help="smoke: stop after N episodes")
+    ap.add_argument("--shard", default="0/1", help="i/n over the sorted pickles "
+                    "(parallel judges write separate H5s; list them all in h5_paths)")
     ap.add_argument("--verify", default=None, metavar="H5", help="verify an existing file and exit")
     args = ap.parse_args()
     if args.verify:
@@ -286,6 +288,8 @@ def main():
     files = sorted(glob.glob(os.path.join(args.pickles, "*.pkl")),
                    key=lambda p: int(os.path.splitext(os.path.basename(p))[0]))
     assert files, f"no pickles under {args.pickles}"
+    si, sn = (int(x) for x in args.shard.split("/"))
+    files = files[si::sn]
     if args.limit:
         files = files[:args.limit]
     for p in files:

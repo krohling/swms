@@ -6,21 +6,24 @@
 # swm-next/configs/datagen_v5_ogbplay.yaml for the dataset recipe.
 #
 # Hypothesis (Kevin, 2026-11-06): the paper's oracle play data trains a
-# better SWM than our diffusion-policy rollouts (v3a). Vs exp4a this varies
-# (1) the data SOURCE and (2) balance_labels (per-question 50/50 class
-# sampling — the paper's MultiHorizonSWMDataset recipe, required because
-# oracle play has ~4% blue-on-green place positives vs v3a's ~26%). (2) is a
-# named confound; an exp5a-unbalanced ablation is the follow-up if 5a wins.
+# better SWM than our diffusion-policy rollouts (v3a). Vs exp4a ONLY the data
+# SOURCE varies. Label balance (smoke, 20 eps, 2026-11-07): the judge's
+# positives are ~21% place / ~23% approach (p>0.5) — close to v3a's 26% / 20%
+# — even though simulator truth is sparse (4.7% blue-on-green, 7.8% grasped),
+# because the judge answers "grasping"/"on top" more permissively (AUC vs
+# truth 0.87 / 0.96). So the paper's per-type true/false balancing
+# (balance_labels, implemented) is NOT needed and stays OFF to keep this a
+# one-variable experiment; flip it on for a follow-up arm if desired.
 # Pre-registered caveats: oracle per-step actions are ~1.5-2x larger on xyz
 # than diffusion proposals and the gripper command is graded (|g|<0.5 on 89%
 # of steps) vs the policy's +-1 — a covariate shift at deployment that the
 # paper's SWM tolerated (scored diffusion proposals at 76 suite).
 # Budget: ~193k cycles x 2 planner questions x 0.95 / 12 lists-per-step x 3
-# epochs ~ 92k steps — matched to exp4a (balanced sampling draws with
-# replacement, len(train) per epoch, so the step count is unchanged).
+# epochs ~ 92k steps — matched to exp4a.
 # Pre-registered success gate (same as team-exp4): peak block-A suite within
 # ~1 s.e. (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a
-# block-B leg. Warm-up pick judged on val_bce_balanced (see warmup_v5.yaml).
+# block-B leg. Warm-up pick judged on plain val BCE as for wu4a
+# (val_bce_balanced is logged alongside as a sparsity check).
 model_id: Qwen/Qwen3-VL-8B-Instruct
 action_dim: 5
 horizon: 16
@@ -38,7 +41,7 @@ accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
 learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
 proj_hidden: 512
 traj_cumsum: true
-balance_labels: true           # per-question 50/50 (p>0.5) class sampling
+balance_labels: false          # OFF: one variable vs exp4a (see header)
 balance_threshold: 0.5
 # init_projector: outputs_swm_lora/exp5a_warmup_v5/ckpt_stepNNNN
 # ^ SET AT PICK-LOCK (wu5 val_bce_balanced argmin over saved ckpts; extend
@@ -55,5 +58,5 @@ resume_every: 500
 seed: 0
 device: cuda
 wandb_project: swm-lora
-run_name: exp5a-ogbplay-balanced
+run_name: exp5a-ogbplay
 out_dir: outputs_swm_lora/exp5a_full
