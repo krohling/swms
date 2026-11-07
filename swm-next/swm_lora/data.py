@@ -71,11 +71,14 @@ class ProposalDataset(Dataset):
 def episode_split(h5_paths, val_frac=0.1, seed=0):
     """Whole-episode split, stratified by policy flag. Returns (train, val)
     lists of (path_idx, ep_name)."""
+    # Strata: the two legacy flags are seeded first so legacy files consume
+    # the RNG in the same order as before (identical splits); any further
+    # policy flag (v5 "oracle_play") becomes its own stratum after them.
     by_policy = {"verifier": [], "random": []}
     for pi, path in enumerate(h5_paths):
         with h5py.File(path, "r") as f:
             for ep in f:
-                by_policy[f[ep].attrs["policy"]].append((pi, ep))
+                by_policy.setdefault(str(f[ep].attrs["policy"]), []).append((pi, ep))
     rng = np.random.RandomState(seed)
     train, val = [], []
     for pol, eps in by_policy.items():
@@ -164,6 +167,29 @@ def collate_cycles(batch):
     return dict(images=images, questions=questions, k=k, m=len(batch),
                 trajs=torch.cat([b["trajs"] for b in batch]),
                 targets=torch.cat([b["targets"] for b in batch]))
+
+
+def balanced_weights(ds, threshold=0.5):
+    """Sampling weights that balance every (question, class) cell of a
+    CycleDataset — Jacob's MultiHorizonSWMDataset recipe (alternate true and
+    false answers per question type; email 2026-06-13) expressed as a
+    WeightedRandomSampler. Class = teacher p > threshold on the item's
+    candidate(s); targets stay the soft p. Equal total mass per cell, so each
+    question draws 50/50 classes and all questions draw equally. Needed for
+    sparse-positive data (v5 oracle play: ~4% place positives).
+    Returns (weights float64 (N,), {(question, is_pos): count})."""
+    cache, cells = {}, []
+    for pi, ep, c, src, col, q in ds.index:
+        key = (pi, ep, src)
+        if key not in cache:
+            with h5py.File(ds.paths[pi], "r") as f:
+                cache[key] = f[ep][src][:]                   # (C, k, ncol)
+        cells.append((q, bool((cache[key][c, :, col] > threshold).any())))
+    counts = {}
+    for cell in cells:
+        counts[cell] = counts.get(cell, 0) + 1
+    w = np.array([1.0 / counts[cell] for cell in cells], dtype=np.float64)
+    return w, counts
 
 
 class PlannerSelectionDataset(Dataset):

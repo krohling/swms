@@ -1,0 +1,59 @@
+# Experiment 5a: exp4a's exact recipe on "the paper's data" — v5 OGBench-
+# ORACLE PLAY episodes (Jacob's collect_demos.py, run unchanged on seeds
+# 70000+; Jacob confirmed by email 2026-08-04 that the paper regenerated its
+# OGBench data this way and never used the public npz), labeled by OUR Qwen
+# teacher with v3a's three planner probes. See
+# swm-next/configs/datagen_v5_ogbplay.yaml for the dataset recipe.
+#
+# Hypothesis (Kevin, 2026-11-06): the paper's oracle play data trains a
+# better SWM than our diffusion-policy rollouts (v3a). Vs exp4a this varies
+# (1) the data SOURCE and (2) balance_labels (per-question 50/50 class
+# sampling — the paper's MultiHorizonSWMDataset recipe, required because
+# oracle play has ~4% blue-on-green place positives vs v3a's ~26%). (2) is a
+# named confound; an exp5a-unbalanced ablation is the follow-up if 5a wins.
+# Pre-registered caveats: oracle per-step actions are ~1.5-2x larger on xyz
+# than diffusion proposals and the gripper command is graded (|g|<0.5 on 89%
+# of steps) vs the policy's +-1 — a covariate shift at deployment that the
+# paper's SWM tolerated (scored diffusion proposals at 76 suite).
+# Budget: ~193k cycles x 2 planner questions x 0.95 / 12 lists-per-step x 3
+# epochs ~ 92k steps — matched to exp4a (balanced sampling draws with
+# replacement, len(train) per epoch, so the step count is unchanged).
+# Pre-registered success gate (same as team-exp4): peak block-A suite within
+# ~1 s.e. (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a
+# block-B leg. Warm-up pick judged on val_bce_balanced (see warmup_v5.yaml).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_v5_ogbplay_s70000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+balance_labels: true           # per-question 50/50 (p>0.5) class sampling
+balance_threshold: 0.5
+# init_projector: outputs_swm_lora/exp5a_warmup_v5/ckpt_stepNNNN
+# ^ SET AT PICK-LOCK (wu5 val_bce_balanced argmin over saved ckpts; extend
+# one 2h gh-dev leg first if the smoothed tail is still falling). The sbatch
+# refuses to start while this line is commented out (INIT_PICK_NOT_LOCKED),
+# so an early-starting job can never train from a fresh adapter by accident.
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 600             # ~25-50 positives per pass (v3a used 200)
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp5a-ogbplay-balanced
+out_dir: outputs_swm_lora/exp5a_full

@@ -33,13 +33,13 @@ import os
 import numpy as np
 import torch
 import yaml
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                   # noqa: E402
-from data import (CycleDataset, action_stats, collate_cycles,  # noqa: E402
-                  episode_split, save_split)
+from data import (CycleDataset, action_stats, balanced_weights,  # noqa: E402
+                  collate_cycles, episode_split, save_split)
 
 
 def within_cycle_rho(p, t, k, m):
@@ -76,6 +76,16 @@ def main():
     val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}",
           flush=True)
+    # exp5: per-question 50/50 class balancing (Jacob's dataset recipe) for
+    # sparse-positive data. Epoch length stays len(train_ds) draws (with
+    # replacement), so total_steps / compute match the unbalanced recipe.
+    sample_w = None
+    if cfg.get("balance_labels", False):
+        sample_w, cells = balanced_weights(
+            train_ds, threshold=float(cfg.get("balance_threshold", 0.5)))
+        print("label-balanced sampling ON: " + ", ".join(
+            f"{q[:30]!r}/{'pos' if c else 'neg'}={n:,}"
+            for (q, c), n in sorted(cells.items())), flush=True)
 
     mc = int(cfg["micro_cycles"])                 # cycles per micro-step
     accum = int(cfg["accum_cycles"])              # micro-steps per opt step
@@ -141,7 +151,7 @@ def main():
         dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_cycles,
                         num_workers=2)
         bces, rhos, rhos_f, ps, ts = [], [], [], [], []
-        drift = []
+        pbs, drift = [], []                        # per-item BCE (class split)
         with torch.no_grad():
             seen = 0
             for b in dl:
@@ -150,6 +160,8 @@ def main():
                 l = model.answer_logit(b["images"], b["questions"], b["trajs"])
                 tt = b["targets"].to(l.device)
                 bces.append(float(model.loss(l, tt)))
+                pbs += torch.nn.functional.binary_cross_entropy_with_logits(
+                    l, tt, reduction="none").cpu().numpy().tolist()
                 p = torch.sigmoid(l).cpu().numpy()
                 rhos += within_cycle_rho(p, b["targets"].numpy(), b["k"], b["m"])
                 # spread-filtered variant: only lists the teacher can rank
@@ -173,7 +185,13 @@ def main():
             bd = float(np.abs(base[:n] - np.array(drift[:n])).mean())
         ps, ts = np.array(ps), np.array(ts)
         model.model.train()
-        return dict(bce=float(np.mean(bces)),
+        pb, pos = np.array(pbs), ts > 0.5          # class-split BCE: on sparse-
+        bce_pos = float(pb[pos].mean()) if pos.any() else 0.0   # positive data
+        bce_neg = float(pb[~pos].mean()) if (~pos).any() else 0.0  # plain BCE
+        return dict(bce=float(np.mean(bces)),                   # tracks the
+                    bce_pos=bce_pos, bce_neg=bce_neg,           # base rate
+                    bce_balanced=0.5 * (bce_pos + bce_neg),
+                    pos_frac=float(pos.mean()),
                     within_cycle_rho=float(np.mean(rhos)) if rhos else 0.0,
                     within_cycle_rho_informative=(float(np.mean(rhos_f))
                                                   if rhos_f else 0.0),
@@ -188,8 +206,15 @@ def main():
     model.model.train()
     step = step0
     g = torch.Generator().manual_seed(cfg.get("seed", 0) + step0)
-    dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
-                    collate_fn=collate_cycles, num_workers=4, drop_last=True)
+    if sample_w is not None:
+        sampler = WeightedRandomSampler(torch.as_tensor(sample_w),
+                                        num_samples=len(train_ds),
+                                        replacement=True, generator=g)
+        dl = DataLoader(train_ds, batch_size=mc, sampler=sampler,
+                        collate_fn=collate_cycles, num_workers=4, drop_last=True)
+    else:
+        dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
+                        collate_fn=collate_cycles, num_workers=4, drop_last=True)
     it = iter(dl)
     while step < total_steps:
         opt.zero_grad(set_to_none=True)

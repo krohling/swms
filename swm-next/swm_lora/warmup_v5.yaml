@@ -1,0 +1,39 @@
+# exp5a trajectory-adapter warm-up: the noscale recipe (exp1b/exp4 standard —
+# learnable_scale false, tokens at 1x) on the v5 OGBench-ORACLE PLAY dataset
+# (Jacob's collect_demos.py episodes, our judge's planner labels; see
+# swm-next/configs/datagen_v5_ogbplay.yaml), so exp5a's warm start derives
+# from its own training data exactly as exp4a's did. Projector only, no LoRA,
+# fixed LR; pick the val-BCE-plateau checkpoint and point train_exp5a.yaml's
+# init_projector at it (submit exp5a ONLY at pick-lock — never hold a queued
+# job, see memory 2026-11-07).
+# v5-specific: positives are sparse (~4% blue-on-green place, ~8% grasp per
+# window), so (a) balance_labels draws 50/50 classes per question (Jacob's
+# MultiHorizonSWMDataset recipe) and (b) the pick is judged on
+# val_bce_balanced (mean of the per-class BCEs), not plain val_bce, which a
+# base-rate predictor can minimize. val lists raised to 600 for the same
+# reason (~25-50 positives per pass).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+h5_paths: [datasets_swm/bg_v5_ogbplay_s70000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+micro_cycles: 2
+accum_cycles: 6                # eff 12 lists/step, exp1 geometry
+learnable_scale: false         # winning noscale recipe: no scalar, tokens at 1x
+proj_hidden: 512
+traj_cumsum: true
+balance_labels: true           # per-question 50/50 (p>0.5) class sampling
+balance_threshold: 0.5
+learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
+max_steps: 6000
+max_grad_norm: 1.0
+val_every: 100
+val_max_lists: 600
+ckpt_every: 250
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: warmup-v5-noscale-balanced
+out_dir: outputs_swm_lora/exp5a_warmup_v5
