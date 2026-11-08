@@ -6,12 +6,15 @@
 # fixed LR; pick the val-BCE-plateau checkpoint and point train_exp5a.yaml's
 # init_projector at it (submit exp5a ONLY at pick-lock — never hold a queued
 # job, see memory 2026-11-07).
-# v5-specific: simulator truth is sparse (~4.7% blue-on-green, ~7.8% grasped
-# per window) but the JUDGE's labels are not (~21% place / ~23% approach at
-# p>0.5; smoke 2026-11-07), so balance_labels stays OFF (one variable vs
-# wu4a; the option is implemented for a follow-up). Pick on plain val BCE as
-# for wu4a; val_bce_balanced / pos_frac are logged alongside as a sparsity
-# check. val lists raised to 600 for a less noisy pick.
+# v5-specific: simulator truth is sparse (3.3% blue-on-green, 10.7% grasped
+# at window end; full set 2026-11-07) and the JUDGE's positives are moderately
+# sparse too (16.3% place / 18.2% approach at p>0.5 — vs v3a's 26% / 20%), so
+# balance_labels stays OFF (one variable vs wu4a; the option is implemented
+# for a follow-up). Pick on plain val BCE as for wu4a; val_bce_balanced /
+# pos_frac are logged alongside as a sparsity check. val lists raised to 600
+# for a less noisy pick. Dataset: 4,200 eps / 193,200 cycles -> 367,080 train
+# / 19,320 val lists (bg_v5_ogbplay_s70000.h5 = the two judge shards merged
+# with swm-next/verifier/merge_h5_shards.py; md5 4b1a7896a38ceb2317481c92084c7794).
 model_id: Qwen/Qwen3-VL-8B-Instruct
 action_dim: 5
 horizon: 16

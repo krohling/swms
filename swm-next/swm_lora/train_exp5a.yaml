@@ -7,19 +7,24 @@
 #
 # Hypothesis (Kevin, 2026-11-06): the paper's oracle play data trains a
 # better SWM than our diffusion-policy rollouts (v3a). Vs exp4a ONLY the data
-# SOURCE varies. Label balance (smoke, 20 eps, 2026-11-07): the judge's
-# positives are ~21% place / ~23% approach (p>0.5) — close to v3a's 26% / 20%
-# — even though simulator truth is sparse (4.7% blue-on-green, 7.8% grasped),
-# because the judge answers "grasping"/"on top" more permissively (AUC vs
-# truth 0.87 / 0.96). So the paper's per-type true/false balancing
-# (balance_labels, implemented) is NOT needed and stays OFF to keep this a
-# one-variable experiment; flip it on for a follow-up arm if desired.
+# SOURCE varies. Label balance (FULL set, 4,200 eps / 193,200 cycles,
+# 2026-11-07): the judge's positives (p>0.5) are 16.3% place / 18.2% approach
+# — sparser than the 20-episode smoke suggested (21% / 23%) and below v3a's
+# 26% / 20% on place — while simulator truth is sparser still (3.3%
+# blue-on-green, 10.7% grasped at window end); the judge answers "grasping" /
+# "on top" more permissively than the simulator (AUC vs truth 0.86 / 0.96).
+# The paper's per-type true/false balancing (balance_labels, implemented)
+# stays OFF so that vs exp4a only the data source varies; flip it on for a
+# follow-up arm if the sparser place positives look like the limiting factor.
+# Trainer index: 3,990 / 210 episodes -> 367,080 train / 19,320 val lists
+# (exp4a: 366,034 / 19,242). Oracle actions reach the clip on dim 0 where the
+# diffusion ckpt's amin is -0.962, so normalized trajs dip to -1.04 (benign).
 # Pre-registered caveats: oracle per-step actions are ~1.5-2x larger on xyz
 # than diffusion proposals and the gripper command is graded (|g|<0.5 on 89%
 # of steps) vs the policy's +-1 — a covariate shift at deployment that the
 # paper's SWM tolerated (scored diffusion proposals at 76 suite).
-# Budget: ~193k cycles x 2 planner questions x 0.95 / 12 lists-per-step x 3
-# epochs ~ 92k steps — matched to exp4a.
+# Budget: 367,080 lists / 12 per step x 3 epochs = 91,770 steps (exp4a:
+# 91,506) — matched to exp4a.
 # Pre-registered success gate (same as team-exp4): peak block-A suite within
 # ~1 s.e. (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a
 # block-B leg. Warm-up pick judged on plain val BCE as for wu4a
