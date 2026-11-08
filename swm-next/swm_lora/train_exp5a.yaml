@@ -13,9 +13,14 @@
 # 26% / 20% on place — while simulator truth is sparser still (3.3%
 # blue-on-green, 10.7% grasped at window end); the judge answers "grasping" /
 # "on top" more permissively than the simulator (AUC vs truth 0.86 / 0.96).
-# The paper's per-type true/false balancing (balance_labels, implemented)
-# stays OFF so that vs exp4a only the data source varies; flip it on for a
-# follow-up arm if the sparser place positives look like the limiting factor.
+# balance_labels is ON (Kevin, 2026-11-08): the unbalanced warm-up (wu5,
+# Vista 1129710) plateaued at plain val BCE 0.393 against a prior-only 0.448,
+# with val_bce_balanced 0.62-0.65 vs chance 0.693 — the projector had mostly
+# learned the base rate — so exp5 adopts the paper's per-type true/false
+# balancing in BOTH stages (balanced warm-up wu5b -> balanced main stage).
+# Vs exp4a this therefore varies the data source AND the sampling; the
+# unbalanced wu5 pick (exp5a_warmup_v5/ckpt_step5000 @ 0.3927) stays on disk
+# as the one-variable fallback.
 # Trainer index: 3,990 / 210 episodes -> 367,080 train / 19,320 val lists
 # (exp4a: 366,034 / 19,242). Oracle actions reach the clip on dim 0 where the
 # diffusion ckpt's amin is -0.962, so normalized trajs dip to -1.04 (benign).
@@ -27,8 +32,8 @@
 # 91,506) — matched to exp4a.
 # Pre-registered success gate (same as team-exp4): peak block-A suite within
 # ~1 s.e. (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a
-# block-B leg. Warm-up pick judged on plain val BCE as for wu4a
-# (val_bce_balanced is logged alongside as a sparsity check).
+# block-B leg. Warm-up pick judged on val_bce_balanced (the balanced
+# objective); plain val BCE is logged alongside.
 model_id: Qwen/Qwen3-VL-8B-Instruct
 action_dim: 5
 horizon: 16
@@ -46,21 +51,22 @@ accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
 learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
 proj_hidden: 512
 traj_cumsum: true
-balance_labels: false          # OFF: one variable vs exp4a (see header)
+balance_labels: true           # ON (Kevin 2026-11-08): balanced warm-up -> balanced main stage
 balance_threshold: 0.5
-init_projector: outputs_swm_lora/exp5a_warmup_v5/ckpt_step5000
-# ^ PICK-LOCKED 2026-11-08 (wu5 = Vista job 1129710 on gh-dev, ran 05:03-07:03
-# CT to step 5660 at the 2h wall; plain val BCE argmin over the saved ckpts,
-# the wu4a rule): ckpt_step5000 @ 0.3927 (runners-up 1500: 0.3953, 500:
-# 0.3954; last saved 5500: 0.3988). The curve is a plateau at 0.39-0.40 from
-# step 100, with a transient bump to 0.44-0.47 over steps 2700-4200 and a
-# return to the plateau by 4900; the 7-pt smoothed tail read 0.3941 @5500 ->
-# 0.3949 @5600 (flat, no new lows), so the extend-one-leg rule was NOT
-# triggered. Context: the prior-only BCE at 16.5% positives is 0.448 and
-# val_bce_balanced sat at 0.62-0.65 (chance 0.693) with pos/neg BCE 0.95 /
-# 0.29 at the end - the projector-only stage separates v5 labels weakly,
-# weaker than wu4a's 0.407 against a 0.54 prior on v3a. The sbatch refuses to
-# start while this line is commented out (INIT_PICK_NOT_LOCKED).
+# init_projector: outputs_swm_lora/exp5a_warmup_v5_balanced/ckpt_stepNNNN
+# ^ SET AT PICK-LOCK from the BALANCED warm-up wu5b (warmup_v5_balanced.yaml):
+# argmin of val_bce_balanced over saved ckpts; extend one 2h gh-dev leg first
+# if the smoothed balanced tail is still falling. The sbatch refuses to start
+# while this line is commented out (INIT_PICK_NOT_LOCKED), so an early-
+# starting job can never train from a fresh adapter by accident.
+# History: the UNBALANCED wu5 (Vista 1129710, ran 05:03-07:03 CT 2026-11-08 to
+# step 5660 at the 2h wall) was pick-locked here briefly as
+# exp5a_warmup_v5/ckpt_step5000 @ plain val BCE 0.3927 (plateau 0.39-0.40 from
+# step 100, transient bump 2700-4200, flat tail -> no extension); Kevin retired
+# that pick the same morning in favour of the balanced recipe because the
+# plateau sat just below the prior-only 0.448 (val_bce_balanced 0.62-0.65 vs
+# chance 0.693; pos/neg BCE 0.95/0.29) — the projector had mostly learned the
+# base rate.
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0

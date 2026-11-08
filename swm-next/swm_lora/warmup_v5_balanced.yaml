@@ -1,0 +1,44 @@
+# exp5a trajectory-adapter warm-up, BALANCED variant (Kevin, 2026-11-08, after
+# the unbalanced wu5 — Vista 1129710 — plateaued at plain val BCE 0.39-0.40,
+# barely below the prior-only 0.448 at 16.5% positives, with val_bce_balanced
+# 0.62-0.65 vs chance 0.693: the projector had mostly learned the base rate).
+# Same noscale recipe as warmup_v5.yaml (projector only, no LoRA, fixed LR,
+# v5 OGBench-oracle play data, same seed -> same episode split, so the val
+# metrics are directly comparable with wu5's) with balance_labels ON: every
+# (question, class) cell is drawn with equal probability (WeightedRandomSampler
+# with replacement, epoch length unchanged) — the paper's per-type true/false
+# balancing (Jacob's MultiHorizonSWMDataset).
+# PICK RULE: argmin of val_bce_balanced over saved ckpts (the objective is the
+# balanced one). Plain val_bce is logged alongside and will sit ABOVE wu5's
+# 0.39 because the model now predicts more positives — that is expected, not
+# a regression. Extend one 2h gh-dev leg via init_projector if the smoothed
+# balanced tail is still falling at the wall. The main stage
+# (train_exp5a.yaml) is balanced too, so exp5a vs exp4a varies the data source
+# AND the sampling; the unbalanced wu5 (exp5a_warmup_v5, pick ckpt_step5000)
+# stays on disk as the one-variable fallback.
+# Submit exp5a ONLY at pick-lock — never hold a queued job (memory 2026-11-07).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+h5_paths: [datasets_swm/bg_v5_ogbplay_s70000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+micro_cycles: 2
+accum_cycles: 6                # eff 12 lists/step, exp1 geometry
+learnable_scale: false         # winning noscale recipe: no scalar, tokens at 1x
+proj_hidden: 512
+traj_cumsum: true
+balance_labels: true           # ON (Kevin 2026-11-08) — see header
+balance_threshold: 0.5
+learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
+max_steps: 6000
+max_grad_norm: 1.0
+val_every: 100
+val_max_lists: 600
+ckpt_every: 250
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: warmup-v5-noscale-balanced
+out_dir: outputs_swm_lora/exp5a_warmup_v5_balanced
