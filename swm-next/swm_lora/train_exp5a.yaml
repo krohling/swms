@@ -48,11 +48,19 @@ proj_hidden: 512
 traj_cumsum: true
 balance_labels: false          # OFF: one variable vs exp4a (see header)
 balance_threshold: 0.5
-# init_projector: outputs_swm_lora/exp5a_warmup_v5/ckpt_stepNNNN
-# ^ SET AT PICK-LOCK (wu5 val_bce_balanced argmin over saved ckpts; extend
-# one 2h gh-dev leg first if the smoothed tail is still falling). The sbatch
-# refuses to start while this line is commented out (INIT_PICK_NOT_LOCKED),
-# so an early-starting job can never train from a fresh adapter by accident.
+init_projector: outputs_swm_lora/exp5a_warmup_v5/ckpt_step5000
+# ^ PICK-LOCKED 2026-11-08 (wu5 = Vista job 1129710 on gh-dev, ran 05:03-07:03
+# CT to step 5660 at the 2h wall; plain val BCE argmin over the saved ckpts,
+# the wu4a rule): ckpt_step5000 @ 0.3927 (runners-up 1500: 0.3953, 500:
+# 0.3954; last saved 5500: 0.3988). The curve is a plateau at 0.39-0.40 from
+# step 100, with a transient bump to 0.44-0.47 over steps 2700-4200 and a
+# return to the plateau by 4900; the 7-pt smoothed tail read 0.3941 @5500 ->
+# 0.3949 @5600 (flat, no new lows), so the extend-one-leg rule was NOT
+# triggered. Context: the prior-only BCE at 16.5% positives is 0.448 and
+# val_bce_balanced sat at 0.62-0.65 (chance 0.693) with pos/neg BCE 0.95 /
+# 0.29 at the end - the projector-only stage separates v5 labels weakly,
+# weaker than wu4a's 0.407 against a 0.54 prior on v3a. The sbatch refuses to
+# start while this line is commented out (INIT_PICK_NOT_LOCKED).
 learning_rate: 1.0e-4
 warmup_frac: 0.03
 max_grad_norm: 1.0
