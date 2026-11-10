@@ -53,12 +53,17 @@ proj_hidden: 512
 traj_cumsum: true
 balance_labels: true           # ON (Kevin 2026-11-08): balanced warm-up -> balanced main stage
 balance_threshold: 0.5
-# init_projector: outputs_swm_lora/exp5a_warmup_v5_balanced/ckpt_stepNNNN
-# ^ SET AT PICK-LOCK from the BALANCED warm-up wu5b (warmup_v5_balanced.yaml):
-# argmin of val_bce_balanced over saved ckpts; extend one 2h gh-dev leg first
-# if the smoothed balanced tail is still falling. The sbatch refuses to start
-# while this line is commented out (INIT_PICK_NOT_LOCKED), so an early-
-# starting job can never train from a fresh adapter by accident.
+init_projector: outputs_swm_lora/exp5a_warmup_v5_balanced/ckpt_step4000
+# ^ PICK-LOCKED 2026-11-09 from the BALANCED warm-up wu5b (Vista 1132250,
+# gh-dev, ran 17:46-19:46 CT to step 5520 at the 2h wall): argmin of
+# val_bce_balanced over saved ckpts = ckpt_step4000 @ 0.5502 (plain val BCE
+# 0.437; runners-up 4500: 0.5520, 1500/5000: 0.5579; last saved 5500:
+# 0.5669). Curve: balanced BCE 0.622 @100 -> ~0.57 by 300 -> drifting down
+# to ~0.55 from 3800 on; 7-pt smoothed tail flat at 0.553-0.557 over steps
+# 4400-5500 (min 0.5535 @5400, 0.5555 @5500) -> extend-one-leg rule NOT
+# triggered. vs the unbalanced wu5 the balanced floor moved 0.62 -> 0.55
+# (chance 0.693), pos/neg BCE ~0.72/0.38 at the pick. The sbatch refuses to
+# start while this line is commented out (INIT_PICK_NOT_LOCKED).
 # History: the UNBALANCED wu5 (Vista 1129710, ran 05:03-07:03 CT 2026-11-08 to
 # step 5660 at the 2h wall) was pick-locked here briefly as
 # exp5a_warmup_v5/ckpt_step5000 @ plain val BCE 0.3927 (plateau 0.39-0.40 from
