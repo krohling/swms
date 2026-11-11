@@ -1,0 +1,23 @@
+{
+ "ckpt": "/work/11599/krohling/vista/swm-followup/swms-exp4/outputs_swm_lora/exp4c_full/ckpt_step16000",
+ "step": 16000,
+ "config": "/work/11599/krohling/vista/swm-followup/swms-exp4/swm-next/swm_lora/train_exp4c.yaml",
+ "n_items": 19242,
+ "n_episodes": 270,
+ "bce": 0.5546061318553965,
+ "bce_se_episode": 0.010425994818129997,
+ "bce_first200": 0.543858464807272,
+ "bce_by_question": {
+  "approach": 0.558867693830213,
+  "place": 0.55034456988058
+ },
+ "bce_pos": 0.9495560272108229,
+ "bce_neg": 0.4165107942425185,
+ "bce_balanced": 0.6830334107266707,
+ "pos_frac": 0.25906870387693587,
+ "mae": 0.2735007922424179,
+ "auc": 0.6886590331420719,
+ "entropy_floor": 0.2742398553522755,
+ "prior_bce": 0.5867615849199701,
+ "seconds": 432.1
+}
