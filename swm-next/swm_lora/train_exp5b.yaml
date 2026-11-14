@@ -1,0 +1,53 @@
+# Experiment 5b (Kevin 2026-11-13/14): exp5a's exact recipe on the PAPER-BLEND
+# set. exp5a's data (v5) is all oracle PLAY; the paper trained on 50/50
+# noisy + play episodes (300 + 300, pooled, sampling balanced over question
+# type x answer). exp5b = 2,100 of exp5a's labeled play episodes (seeds
+# 70000-72099, bg_v5_ogbplay_s70000_n2100.h5) + 2,100 new NOISY episodes
+# (collect_demos.py --dataset-type noisy: Markov oracle, Gaussian action
+# noise, 10% random actions; seeds 80000-82099; same judge, same three
+# probes; swm-next/configs/datagen_v5_ogbnoisy.yaml). Same episode count,
+# label count and step budget as exp5a, so vs exp5a ONLY the play/noisy
+# composition varies.
+# Trainer index: 3,990 / 210 episodes (1,995 + 1,995 train, 105 + 105 val by
+# policy stratum) -> 367,080 train / 19,320 val examples; 367,080 / 12 per
+# step x 3 epochs = 91,770 steps (= exp5a).
+# balance_labels ON in both stages, as exp5a. Warm-up: own-data balanced
+# warm-up (warmup_v5blend_balanced.yaml), pick = argmin val_bce_balanced.
+# Success gate: the team-exp4 gate (peak block-A suite within ~1 s.e. of
+# 54.7 AND >=3 over control 46.7).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths:
+  - datasets_swm/bg_v5_ogbplay_s70000_n2100.h5
+  - datasets_swm/bg_v5_ogbnoisy_s80000.h5
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+balance_labels: true           # as exp5a: balanced warm-up -> balanced main stage
+balance_threshold: 0.5
+# init_projector: outputs_swm_lora/exp5b_warmup_v5blend_balanced/ckpt_stepNNNN
+# ^ NOT LOCKED: uncomment with the warm-up pick (argmin val_bce_balanced). The
+# sbatch refuses to start while this line is commented out.
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 600             # as exp5a
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp5b-ogbblend
+out_dir: outputs_swm_lora/exp5b_full

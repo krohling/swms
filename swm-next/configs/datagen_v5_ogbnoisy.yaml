@@ -1,0 +1,44 @@
+# v5 NOISY half of the paper-blend set (exp5b; Kevin 2026-11-13/14): the paper
+# trained on 50/50 noisy + play episodes (300 + 300), and our v5 set
+# (datagen_v5_ogbplay.yaml) is all play. This file is the same recipe with
+# collect_demos.py's other mode:
+#   `--dataset-type noisy --num-episodes 2100 --seed-offset 80000`
+# i.e. the closed-loop Markov oracle with Gaussian action noise and 10% random
+# actions (OGBench commands.sh) — the paper's "expert" data. Conversion,
+# windows, the three planner probes, judge and gate/score constants are
+# identical to the play half (convert_ogb_v5.py reads collect.dataset_type and
+# writes policy="oracle_noisy", its own episode_split stratum).
+#
+# The blend = these 2,100 noisy episodes + 2,100 of the already-labeled play
+# episodes (seeds 70000-72099, subset_h5_episodes.py): 4,200 episodes, the same
+# size as the play-only set exp5a trained on.
+device: mps                    # LARG/Vista override to cuda
+seed_start: 80000              # noisy range 80000-82099. Taken elsewhere: 6000-6099
+                               # eval / 10000-10799 / 12000-22799 / 30000-35399 /
+                               # 40000-40999 / 42000+ v3a / 50000-56499 v2 /
+                               # 60000+ v3b / 70000-74199 v5 play / 90000+ smoke
+                               # (noisy smoke: 90220-90239) / 100000-116199 v3b 4x
+episodes: 2100
+block_combo: [blue_cube, green_cube]
+arm_alpha: 0.1                 # documentation only — frames come from collect_demos
+model_id: Qwen/Qwen3-VL-8B-Instruct
+judge_batch: 24                # probes per forward (3 per window); MPS-sized
+
+collect:                       # mirrors collect_demos.py main() — for the record
+  script: ogbench/collect_demos.py
+  dataset_type: noisy
+  env: visual-cube-quadruple-v0
+  max_episode_steps: 200
+  noise: 0.1
+  noise_smoothing: 0.5
+  min_norm: 0.4
+  p_random_action: 0.1
+  p_stack: "U(0.1, 0.5)"
+  control_timestep: 0.1
+  width: 224
+  height: 224
+
+window:
+  horizon: 16
+  stride: 4
+  start: 1                     # frame 0 is the pre-settle reset frame

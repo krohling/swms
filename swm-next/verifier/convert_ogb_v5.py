@@ -140,7 +140,7 @@ def label_windows(judge, frames, starts, q_app, q_place, q_hold, batch):
 
 
 def write_episode(h5, ep, env_seed, ep_index, src, p3, starts, q_app, q_place,
-                  q_hold, arm, blue, green):
+                  q_hold, arm, blue, green, policy="oracle_play"):
     C = len(starts)
     frames, actions, gt, poses = ep["frames"], ep["actions"], ep["gt"], ep["poses"]
     p_app, p_place, rg = p3[:, 0], p3[:, 1], p3[:, 2]
@@ -182,7 +182,7 @@ def write_episode(h5, ep, env_seed, ep_index, src, p3, starts, q_app, q_place,
     grp.create_dataset("gt_place_t", data=gt[st, k_place])
     grp.create_dataset("gt_grasp_t", data=gt[st, OFF_GRASP + blue])
     grp.attrs.update(dict(
-        seed=int(env_seed), policy="oracle_play", arm=arm, success=False,
+        seed=int(env_seed), policy=policy, arm=arm, success=False,
         cycles=C, q_approach=q_app, q_place=q_place, q_hold=q_hold,
         color_lookup=json.dumps(ep["lookup"]), source_pickle=os.path.basename(src),
         episode_index=int(ep_index), gt_types=json.dumps(ep["types"]),
@@ -219,12 +219,13 @@ def verify(path):
     acc = dict(p_app=[], p_place=[], gt_place=[], gt_grasp=[])
     from PIL import Image
     import io
-    n_eps = 0
+    n_eps, by_policy = 0, {}
     for ep in f:
         g = f[ep]
         C = g["labels"].shape[0]
         assert int(g.attrs["seed"]) not in EVAL_SEEDS, f"{ep}: eval seed"
-        assert g.attrs["policy"] == "oracle_play"
+        assert g.attrs["policy"] in ("oracle_play", "oracle_noisy"), g.attrs["policy"]
+        by_policy[g.attrs["policy"]] = by_policy.get(g.attrs["policy"], 0) + 1
         assert g["trajs"].shape == (C, 1, H, 5) and g["labels"].shape == (C, 1, 3)
         assert g["frames_t"].shape == (C,) and g["end_frames"].shape == (C, 1)
         assert g["proposal_trajs"].shape == (C, 1, H, 5)
@@ -252,7 +253,8 @@ def verify(path):
         acc["gt_place"].append(g["gt_place"][:]); acc["gt_grasp"].append(g["gt_grasp"][:])
         n_eps += 1
     assert n_eps, f"{path}: no episodes"
-    print(f"VERIFY_OK {path}: {n_eps} episodes\n" + summarize(acc), flush=True)
+    print(f"VERIFY_OK {path}: {n_eps} episodes {by_policy}\n" + summarize(acc),
+          flush=True)
 
 
 def main():
@@ -283,7 +285,11 @@ def main():
     assert q_hold == q_app, "v5 mirrors v3a's 3-probe layout (q_hold == q_app)"
     top, bottom = cfg["block_combo"]                 # e.g. blue_cube, green_cube
     top_color, bottom_color = top.split("_")[0], bottom.split("_")[0]
-    arm = "v5_ogbench_play"
+    # collect_demos --dataset-type: "play" (plan oracle) or "noisy" (Markov
+    # oracle + action noise, p_random_action 0.1); each is its own split stratum
+    dtype = (cfg.get("collect") or {}).get("dataset_type", "play")
+    assert dtype in ("play", "noisy"), dtype
+    arm, policy = f"v5_ogbench_{dtype}", f"oracle_{dtype}"
 
     files = sorted(glob.glob(os.path.join(args.pickles, "*.pkl")),
                    key=lambda p: int(os.path.splitext(os.path.basename(p))[0]))
@@ -309,11 +315,12 @@ def main():
                 pick_rule="oracle", temp_schedule="none", lookahead=H,
                 temps=[np.nan], arm=arm, model_id=cfg["model_id"], schema_version=5,
                 recipe=json.dumps(dict(
-                    config=cfg, source="ogbench/collect_demos.py --dataset-type play",
+                    config=cfg, source=f"ogbench/collect_demos.py --dataset-type {dtype}",
                     ogbench_fork_commit=fork_commit(cfg.get("ogbench_commit")),
                     collect=dict(env="visual-cube-quadruple-v0", max_episode_steps=200,
                                  noise=0.1, noise_smoothing=0.5, min_norm=0.4,
-                                 p_random_action=0.0, p_stack="U(0.1,0.5)",
+                                 p_random_action=0.1 if dtype == "noisy" else 0.0,
+                                 p_stack="U(0.1,0.5)",
                                  control_timestep=0.1, width=224, height=224,
                                  pixel_transparent_arm="OGBench default (True)",
                                  seed_offset=args.seed_offset),
@@ -335,7 +342,7 @@ def main():
             te = time.time()
             p3 = label_windows(judge, ep["frames"], starts, q_app, q_place, q_hold, batch)
             r = write_episode(h5, ep, env_seed, idx, path, p3, starts, q_app, q_place,
-                              q_hold, arm, blue, green)
+                              q_hold, arm, blue, green, policy)
             for k2 in acc:
                 acc[k2].append(r[k2])
             done += 1
