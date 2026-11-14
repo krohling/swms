@@ -39,7 +39,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                   # noqa: E402
 from data import (CycleDataset, action_stats, balanced_weights,  # noqa: E402
-                  collate_cycles, episode_split, save_split)
+                  collate_cycles, episode_split, episode_split_fixed_val,
+                  save_split)
 
 
 def within_cycle_rho(p, t, k, m):
@@ -67,9 +68,13 @@ def main():
     np.random.seed(cfg.get("seed", 0))
 
     amin, amax = action_stats(cfg["diffusion_ckpt"])
-    train_eps, val_eps = episode_split(cfg["h5_paths"],
-                                       val_frac=cfg.get("val_frac", 0.1),
-                                       seed=cfg.get("seed", 0))
+    if cfg.get("fixed_val_split"):                # exp6: keep an earlier run's
+        train_eps, val_eps = episode_split_fixed_val(   # held-out episodes
+            cfg["h5_paths"], cfg["fixed_val_split"])
+    else:
+        train_eps, val_eps = episode_split(cfg["h5_paths"],
+                                           val_frac=cfg.get("val_frac", 0.1),
+                                           seed=cfg.get("seed", 0))
     save_split(f"{out}/split.json", train_eps, val_eps, cfg["h5_paths"])
     qsel = cfg.get("questions", "planner")
     train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax, questions=qsel)
@@ -91,7 +96,7 @@ def main():
     accum = int(cfg["accum_cycles"])              # micro-steps per opt step
     epochs = float(cfg.get("epochs", 4))
     steps_per_epoch = len(train_ds) // (mc * accum)
-    total_steps = int(epochs * steps_per_epoch)
+    total_steps = int(cfg.get("total_steps") or epochs * steps_per_epoch)
     warmup = int(cfg.get("warmup_frac", 0.03) * total_steps)
 
     model = QwenSWM(model_id=cfg["model_id"], action_dim=cfg["action_dim"],

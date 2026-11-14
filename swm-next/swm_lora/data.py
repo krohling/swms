@@ -8,6 +8,7 @@ own stats so normalization is frozen with the data, not the code.
 """
 import io
 import json
+import os
 
 import h5py
 import numpy as np
@@ -87,6 +88,25 @@ def episode_split(h5_paths, val_frac=0.1, seed=0):
         n_val = max(1, int(round(len(eps) * val_frac)))
         val += eps[:n_val]
         train += eps[n_val:]
+    return sorted(train), sorted(val)
+
+
+def episode_split_fixed_val(h5_paths, split_json):
+    """Reuse an earlier run's val episodes (its split.json, files matched by
+    basename) as the WHOLE val set; every other episode of every file trains.
+    For datasets that grew by adding files: episode_split reshuffles the pooled
+    list, so the earlier run's held-out episodes would mostly land in train."""
+    ref = json.load(open(split_json))
+    names = [os.path.basename(str(p)) for p in h5_paths]
+    val = {(names.index(os.path.basename(ref["h5_paths"][pi])), ep)
+           for pi, ep in ref["val"]}
+    train = []
+    for pi, path in enumerate(h5_paths):
+        with h5py.File(path, "r") as f:
+            eps = set(f.keys())
+        missing = {ep for p, ep in val if p == pi} - eps
+        assert not missing, f"{path}: {len(missing)} fixed val episodes absent"
+        train += [(pi, ep) for ep in eps if (pi, ep) not in val]
     return sorted(train), sorted(val)
 
 
