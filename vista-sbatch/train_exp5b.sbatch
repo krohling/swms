@@ -5,8 +5,8 @@
 #SBATCH -n 1
 #SBATCH -t 48:00:00
 #SBATCH -o %x-%j.out
-# Experiment 5b: exp5a's recipe on the paper-blend set (train_exp5b.yaml;
-# 2,100 play + 2,100 noisy episodes). 91,770 steps at ~1,800 steps/h is ~51 h,
+# Experiment 5b: the paper-blend set (2,100 play + 2,100 noisy episodes) at 96
+# examples/step for 80,367 steps (train_exp5b.yaml); ~53 h at exp6a's 2.36 s/step,
 # so submit twice: leg 1, then leg 2 with --dependency=afterany:<leg1>
 # (--resume auto; the DONE guard no-ops a redundant leg 2). Runs from
 # $WORK/swm-followup/swms-exp5 (branch exp5-ogb-play).

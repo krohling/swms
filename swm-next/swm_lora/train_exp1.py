@@ -91,7 +91,7 @@ def main():
     accum = int(cfg["accum_cycles"])              # micro-steps per opt step
     epochs = float(cfg.get("epochs", 4))
     steps_per_epoch = len(train_ds) // (mc * accum)
-    total_steps = int(epochs * steps_per_epoch)
+    total_steps = int(cfg.get("total_steps") or epochs * steps_per_epoch)
     warmup = int(cfg.get("warmup_frac", 0.03) * total_steps)
 
     model = QwenSWM(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
