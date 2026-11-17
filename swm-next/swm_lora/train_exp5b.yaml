@@ -42,9 +42,15 @@ proj_hidden: 512
 traj_cumsum: true
 balance_labels: true           # as exp5a: balanced warm-up -> balanced main stage
 balance_threshold: 0.5
-# init_projector: outputs_swm_lora/exp5b_warmup_v5blend_balanced/ckpt_stepNNNN
-# ^ NOT LOCKED: uncomment with the warm-up pick (argmin val_bce_balanced). The
-# sbatch refuses to start while this line is commented out.
+init_projector: outputs_swm_lora/exp5b_warmup_v5blend_balanced_larg/ckpt_step5500
+# ^ PICK-LOCKED 2026-11-16 from the balanced blend warm-up run on LARG
+# (aaronson GPU 0, larg-scripts/launch_warmup_v5blend.sh, 6000 steps at 12
+# examples/step; the Vista copy 1147408 was cancelled before it started):
+# argmin of val_bce_balanced over saved ckpts = ckpt_step5500 @ 0.5291 (plain
+# val BCE 0.480; runners-up 3500: 0.5364, 5000: 0.5414; last saved 6000:
+# 0.5416). The LARG venv runs transformers 5.12.1 (Vista: 4.57.1); scorer
+# parity between the two was measured on exp4b@64k (|dp| <= 0.012).
+# projector.pt md5 939f399c21b08a17335983fef9f1661a (LARG = m5 = Vista).
 learning_rate: 1.0e-4          # exp1b's value at this batch size
 warmup_frac: 0.03
 max_grad_norm: 1.0
