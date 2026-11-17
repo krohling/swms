@@ -32,6 +32,10 @@
 # with an atomic mkdir; a cl job whose checkpoint is not staged yet is passed
 # over, and a worker with only such jobs left waits for them. A first-block
 # job that a launch_sr_sweep.sh worker has claimed counts as claimed here too.
+# A claim outlives its job: another host can go on seeing "no result file" for
+# up to a minute after the result is written (NFS attribute cache), and a claim
+# removed in that window let salah repeat pulisic's base_yr_s6400n150 on
+# 2026-11-17. To run a job again, delete its result and its claim.
 # The host-load and >=1-free-GPU guards are acquisition rules (Kevin
 # 2026-11-16): they are checked once, at launch, and a worker that has its GPU
 # keeps it between jobs. Before each job a worker only re-checks that nobody
@@ -49,7 +53,10 @@
 # STOP), then starts this queue's worker on the same GPU without the two
 # acquisition guards. It refuses when there is no such session, so it cannot
 # take a GPU we do not have. It blocks while it waits: run it in a tmux session
-# of its own whose name does not start with sr8k-g.
+# of its own whose name does not start with sr8k-g. The new worker script is
+# written beside the running one and moved in after the wait, so the order
+# "start the keep calls, then touch STOP" replaces every worker at the end of
+# its current job.
 set -e
 GPU=${1:?gpu index}; Q=${2:?queue file}; MODE=${3:-launch}
 W=$(cd "$(dirname "$0")/.." && pwd)
@@ -78,6 +85,9 @@ for g in $(seq 0 $((GPU - 1))); do
 done
 WORKER=$LOGDIR/worker_${HOST}_g${GPU}.sh
 [ $MODE = check ] && WORKER=$LOGDIR/worker_${HOST}_g${GPU}.check.sh
+# with "keep" the worker being replaced may be running $WORKER itself
+GEN=$WORKER
+[ $MODE = keep ] && GEN=$WORKER.next
 # the launch-time values go in as a header; the body below is written verbatim
 {
   echo "#!/bin/bash"
@@ -218,17 +228,18 @@ while :; do
   echo "END $id $HOST g$GPU $(date '+%m-%d %H:%M') $(grep -E 'EVAL_DONE|MPC_DONE|Error|Traceback' "$log" | tail -1)"
   # a job that leaves no result keeps its claim and stops this worker
   [ -f "$out" ] || { echo "WORKER_FAILED $HOST g$GPU $id $(date '+%m-%d %H:%M')"; exit 1; }
-  rm -rf $claim
+  # the claim stays (see the header): mkdir on it fails on every host at once
+  date '+%m-%d %H:%M' > $claim/done
 done
 INNER
-} > $WORKER
-chmod +x $WORKER
+} > $GEN
+chmod +x $GEN
 if [ $MODE = check ]; then
   bash -n $WORKER
   $WORKER --check
   exit $?
 fi
-$WORKER --check > /dev/null || { $WORKER --check | grep "^bad"; echo "fix $Q first"; exit 1; }
+$GEN --check > /dev/null || { $GEN --check | grep "^bad"; echo "fix $Q first"; exit 1; }
 gpu_free() {
   local mu ut
   mu=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i $1)
@@ -243,6 +254,10 @@ if [ $MODE = keep ]; then
     if gpu_free $GPU; then break; fi
     sleep 5
   done
+  # a worker ends on a STOP newer than its script: the new script has to be
+  # newer than the STOP that ended the old worker
+  mv $GEN $WORKER
+  touch $WORKER
 fi
 gpu_free $GPU || { echo "GPU $GPU busy on $HOST — refusing"; exit 1; }
 if [ $MODE = launch ]; then
