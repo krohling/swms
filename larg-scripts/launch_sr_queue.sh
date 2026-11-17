@@ -13,6 +13,7 @@
 # Queue lines, in priority order ("#" lines and blank lines are skipped):
 #   cl   <checkout> <run> <step> <task> <episodes> <seed_start>
 #   base <checkout> -     -      <task> <episodes> <seed_start>
+#   teacher <checkout> -  -      <task> <episodes> <seed_start>
 # cl   = eval_closed_loop.py on <run>'s ckpt_step<step>, k=8, as the n=50 sweep.
 #        Result: <checkout>/experiments/<run>_larg/eval_cl_step<step>_<task>_k8.json
 #        for the first block (50 episodes from seed 6000); any other block adds
@@ -22,6 +23,14 @@
 #        recipe of experiments/anchors_tau1/REPORT.md. No Qwen is loaded.
 #        Result: <checkout>/experiments/base_larg/base_k1_tau1_<task>_s<seed_start>n<episodes>/
 #                mpc_softgate_ema_templadder_k1_L16.json
+# teacher = verifier/mpc.py with the zero-shot Qwen judge choosing among k=8
+#        proposals (Kevin 2026-11-17: the original teacher configuration at
+#        n=200 per task): each proposal is rolled out 16 steps in the simulator,
+#        Qwen scores its end frame, the best one is executed. Scorer and
+#        temperature ladder are those of the September teacher row
+#        (outputs_verifier_mpc_softgate_ema_k8_n50, 64 / 68 / 62 on m5).
+#        Result: <checkout>/experiments/teacher_larg/teacher_k8_<task>_s<seed_start>n<episodes>/
+#                mpc_softgate_ema_templadder_k8_L16.json
 # <checkout> is a harness checkout under /scratch/cluster/krohling (swms-exp1 =
 # branch pointwise-k1 for exp4, swms-exp6 = exp6-v3b-x4 for exp6). Each job
 # runs from its own checkout with that checkout on PYTHONPATH. <task> is bg, by
@@ -111,6 +120,8 @@ export OMP_NUM_THREADS=8
 # .prod() on the GPU with "CUDA driver error: invalid argument" (the Qwen image
 # path calls it). Keep the cache on scratch, next to the venv it belongs to.
 export PYTORCH_KERNEL_CACHE_PATH=$ROOT/swm-followup/torch_kernel_cache
+# the teacher's k=8 ladder, as the September result files record it
+TEACHER_TEMPS=0.0,0.2857,0.5714,0.8571,1.1429,1.4286,1.7143,2.0
 # free = <1GB used and <5% util, as everywhere on LARG
 gpu_free() {
   local mu ut
@@ -162,6 +173,10 @@ job() {
       ckpt=""
       id=base_${task}${sfx}
       out=experiments/base_larg/base_k1_tau1_${task}${sfx}/mpc_softgate_ema_templadder_k1_L16.json ;;
+    teacher)
+      ckpt=""
+      id=teacher_${task}${sfx}
+      out=experiments/teacher_larg/teacher_k8_${task}${sfx}/mpc_softgate_ema_templadder_k8_L16.json ;;
     *) return 1 ;;
   esac
 }
@@ -220,6 +235,10 @@ while :; do
     timeout 5h nice -n 10 $PY swm-next/swm_lora/eval_closed_loop.py \
       --ckpt $ckpt --config $cfg --train-config swm-next/swm_lora/train_${run}.yaml \
       --episodes $eps --seed-start $seed0 --k 8 --out "$out" > "$log" 2>&1
+  elif [ $kind = teacher ]; then
+    timeout 8h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
+      --temps $TEACHER_TEMPS --scorer softgate_ema --lookahead 16 \
+      --seeds $eps --seed-start $seed0 --out "$(dirname "$out")" > "$log" 2>&1
   else
     timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
       --k 1 --temps 1.0 --scorer softgate_ema --lookahead 16 \
