@@ -9,10 +9,12 @@
 # The queue file holds "<arm> <step> <task>" lines in priority order and is
 # shared by every worker on every host (scratch is one filer): a worker takes
 # the first job that has a staged checkpoint, no result and no claim, and
-# claims it with an atomic mkdir. The guards run again before every job, and
-# a worker stops rather than waits or retries when its GPU has been taken,
-# the host is loaded, its next job would leave no free GPU, or a job leaves
-# no result (that job's claim stays, so no other worker repeats it).
+# claims it with an atomic mkdir. The host-load and >=1-free-GPU guards are
+# acquisition rules (Kevin 2026-11-16): they are checked once, at launch, and
+# a worker that has its GPU keeps it between jobs. Before each job a worker
+# only re-checks that nobody else is on its GPU, and it stops rather than
+# waits or retries when the GPU has been taken or a job leaves no result
+# (that job's claim stays, so no other worker repeats it).
 # `touch <log dir>/STOP` ends every worker launched before the touch, after its
 # current job (a STOP file older than a worker is ignored, so a forgotten one
 # cannot block a later launch).
@@ -69,18 +71,9 @@ gpu_free() {
   ut=\$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits -i \$1)
   [ "\$mu" -lt 1024 ] 2>/dev/null && [ "\$ut" -lt 5 ] 2>/dev/null
 }
+# host load and >=1 free GPU are checked at launch only: a worker keeps its GPU
 guard() {
   gpu_free $GPU || { echo "GPU $GPU is in use"; return 1; }
-  # nproc alone would return OMP_NUM_THREADS
-  awk -v c="\$(nproc --all)" -v l="\$(cut -d" " -f1 /proc/loadavg)" 'BEGIN{exit !(l < c/2)}' \\
-    || { echo "host load \$(cut -d" " -f1 /proc/loadavg) too high"; return 1; }
-  # Kevin 2026-11-02: a placement must leave >=1 free GPU on the machine
-  local g others=0
-  for g in \$(seq 0 \$((\$(nvidia-smi -L | wc -l) - 1))); do
-    [ "\$g" -eq $GPU ] && continue
-    gpu_free \$g && others=\$((others + 1))
-  done
-  [ "\$others" -ge 1 ] || { echo "GPU $GPU would leave 0 free GPUs on this host"; return 1; }
 }
 cfg_for() {
   case "\$1" in
@@ -136,7 +129,9 @@ while :; do
 done
 INNER
 chmod +x $WORKER
-# same guard as the worker runs before each job, checked here before launching
+# acquisition guards, checked here only: GPU idle, host load under half the
+# cores (nproc alone would return OMP_NUM_THREADS), >=1 other GPU left free
+# (Kevin 2026-11-02)
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 gpu_free() {
   local mu ut
