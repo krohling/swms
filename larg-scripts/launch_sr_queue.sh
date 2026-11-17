@@ -14,6 +14,7 @@
 #   cl   <checkout> <run> <step> <task> <episodes> <seed_start>
 #   base <checkout> -     -      <task> <episodes> <seed_start>
 #   teacher <checkout> -  -      <task> <episodes> <seed_start>
+#   random  <checkout> -  -      <task> <episodes> <seed_start>
 # cl   = eval_closed_loop.py on <run>'s ckpt_step<step>, k=8, as the n=50 sweep.
 #        Result: <checkout>/experiments/<run>_larg/eval_cl_step<step>_<task>_k8.json
 #        for the first block (50 episodes from seed 6000); any other block adds
@@ -31,6 +32,13 @@
 #        (outputs_verifier_mpc_softgate_ema_k8_n50, 64 / 68 / 62 on m5).
 #        Result: <checkout>/experiments/teacher_larg/teacher_k8_<task>_s<seed_start>n<episodes>/
 #                mpc_softgate_ema_templadder_k8_L16.json
+# random = the teacher's matched control (Kevin 2026-11-17): the same mpc.py
+#        run, the same k=8 ladder and 16-step rollouts, but the executed
+#        proposal is drawn uniformly at random and no Qwen is loaded
+#        (--scorer random, the code of the October outputs_random row,
+#        48 / 56 / 38 on m5). Queue it on the teacher's seeds.
+#        Result: <checkout>/experiments/random_larg/random_k8_<task>_s<seed_start>n<episodes>/
+#                mpc_random_templadder_k8_L16.json
 # <checkout> is a harness checkout under /scratch/cluster/krohling (swms-exp1 =
 # branch pointwise-k1 for exp4, swms-exp6 = exp6-v3b-x4 for exp6). Each job
 # runs from its own checkout with that checkout on PYTHONPATH. <task> is bg, by
@@ -177,6 +185,10 @@ job() {
       ckpt=""
       id=teacher_${task}${sfx}
       out=experiments/teacher_larg/teacher_k8_${task}${sfx}/mpc_softgate_ema_templadder_k8_L16.json ;;
+    random)
+      ckpt=""
+      id=random_${task}${sfx}
+      out=experiments/random_larg/random_k8_${task}${sfx}/mpc_random_templadder_k8_L16.json ;;
     *) return 1 ;;
   esac
 }
@@ -238,6 +250,10 @@ while :; do
   elif [ $kind = teacher ]; then
     timeout 8h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
       --temps $TEACHER_TEMPS --scorer softgate_ema --lookahead 16 \
+      --seeds $eps --seed-start $seed0 --out "$(dirname "$out")" > "$log" 2>&1
+  elif [ $kind = random ]; then
+    timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
+      --temps $TEACHER_TEMPS --scorer random --lookahead 16 \
       --seeds $eps --seed-start $seed0 --out "$(dirname "$out")" > "$log" 2>&1
   else
     timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
