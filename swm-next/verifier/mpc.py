@@ -222,6 +222,12 @@ def score_candidates(judge, scorer, phase, questions, current, end_frames,
             breakdown[q] = [round(float(v), 4) for v in p]
             total += w * p
         return total, breakdown
+    if scorer == "random":
+        # Selection-ablated control: identical candidate distribution
+        # (temperature ladder), uniform-random pick. Isolates the verifier's
+        # discrimination from the modified proposal distribution. Seeded via
+        # the global np.random stream (reseeded per episode in run_episode).
+        return np.random.rand(len(end_frames)), {}
     if scorer == "progress":
         pairs = [(current, f) for f in end_frames]
         return ask(pairs, questions["progress"]), {}
@@ -470,7 +476,7 @@ def _init_worker(cfg, args):
     goal = get_ogbench_goal("stack_blocks", env, None, ANSWER_OPTIONS,
                             {"block_combo": cfg["block_combo"]})
     judge = None
-    if args.scorer != "oracle_dist" and (args.k > 1 or args.scorer == "phase" or args.spec):
+    if args.scorer not in ("oracle_dist", "random") and (args.k > 1 or args.scorer == "phase" or args.spec):
         from label_teacher import QwenJudge
         judge = QwenJudge(model_id=cfg["model_id"], device=cfg["device"])
     spec = load_spec(args.spec, cfg) if (args.spec and args.scorer != "oracle_dist") else None
@@ -555,7 +561,7 @@ def main():
 
     import sys
     sys.dont_write_bytecode = True
-    needs_judge = args.scorer != "oracle_dist" and (
+    needs_judge = args.scorer not in ("oracle_dist", "random") and (
         args.k > 1 or args.scorer == "phase" or args.spec)
     judge = None
     if needs_judge:
