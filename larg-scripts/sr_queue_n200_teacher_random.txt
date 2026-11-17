@@ -13,6 +13,10 @@
 #    task on the seeds of step 3 (6000-6049 + 6100-6249), once step 3 has run out.
 # 5. Matched control for step 4: the same proposals and rollouts, the executed
 #    one drawn at random, no Qwen; the same 200 seeds per task.
+# 6. exp6a from n=50 to n=200 per task (Kevin 2026-11-17: 200 per task is the
+#    protocol from here on): 150 more episodes per checkpoint on the seeds of
+#    step 3 (6100-6249), latest checkpoint first, after step 5. A checkpoint
+#    that is not on LARG yet is passed over until it is.
 # kind checkout run step task episodes seed_start
 teacher swms-exp1 - - bg 3 90000
 random swms-exp1 - - bg 3 90003
@@ -202,3 +206,33 @@ random swms-exp1 - - yr 150 6100
 random swms-exp1 - - bg 50 6000
 random swms-exp1 - - by 50 6000
 random swms-exp1 - - yr 50 6000
+cl swms-exp6 exp6a 80000 bg 150 6100
+cl swms-exp6 exp6a 80000 by 150 6100
+cl swms-exp6 exp6a 80000 yr 150 6100
+cl swms-exp6 exp6a 72000 bg 150 6100
+cl swms-exp6 exp6a 72000 by 150 6100
+cl swms-exp6 exp6a 72000 yr 150 6100
+cl swms-exp6 exp6a 64000 bg 150 6100
+cl swms-exp6 exp6a 64000 by 150 6100
+cl swms-exp6 exp6a 64000 yr 150 6100
+cl swms-exp6 exp6a 56000 bg 150 6100
+cl swms-exp6 exp6a 56000 by 150 6100
+cl swms-exp6 exp6a 56000 yr 150 6100
+cl swms-exp6 exp6a 48000 bg 150 6100
+cl swms-exp6 exp6a 48000 by 150 6100
+cl swms-exp6 exp6a 48000 yr 150 6100
+cl swms-exp6 exp6a 40000 bg 150 6100
+cl swms-exp6 exp6a 40000 by 150 6100
+cl swms-exp6 exp6a 40000 yr 150 6100
+cl swms-exp6 exp6a 32000 bg 150 6100
+cl swms-exp6 exp6a 32000 by 150 6100
+cl swms-exp6 exp6a 32000 yr 150 6100
+cl swms-exp6 exp6a 24000 bg 150 6100
+cl swms-exp6 exp6a 24000 by 150 6100
+cl swms-exp6 exp6a 24000 yr 150 6100
+cl swms-exp6 exp6a 16000 bg 150 6100
+cl swms-exp6 exp6a 16000 by 150 6100
+cl swms-exp6 exp6a 16000 yr 150 6100
+cl swms-exp6 exp6a 8000 bg 150 6100
+cl swms-exp6 exp6a 8000 by 150 6100
+cl swms-exp6 exp6a 8000 yr 150 6100
