@@ -28,6 +28,13 @@
 #    end. Four 50-episode jobs per task; the three on the paper's seeds
 #    (6000-6049) come first. A worker started from a launcher older than
 #    eff4a21 does not know the swm kind and stops on these lines.
+# 9. Diagnostic, not a results row (Kevin 2026-11-18): exp6a 56k with the
+#    per-cycle log on (the pick, the scores, and the simulator outcome of all
+#    8 proposals), 50 episodes per task on seeds 6000-6049, behind everything
+#    above. Run name exp6acyc is an alias: in swms-exp6cyc (branch
+#    exp6-cycle-log), outputs_swm_lora/exp6acyc_full is a symlink to
+#    swms-exp6's exp6a_full and train_exp6acyc.yaml turns the log on, so the
+#    results land in experiments/exp6acyc_larg, apart from exp6a's rows.
 # kind checkout run step task episodes seed_start
 teacher swms-exp1 - - bg 3 90000
 random swms-exp1 - - bg 3 90003
@@ -319,3 +326,6 @@ swm swms-exp1 paligemma_wm_ogbench - yr 50 6150
 swm swms-exp1 paligemma_wm_ogbench - bg 50 6200
 swm swms-exp1 paligemma_wm_ogbench - by 50 6200
 swm swms-exp1 paligemma_wm_ogbench - yr 50 6200
+cl swms-exp6cyc exp6acyc 56000 bg 50 6000
+cl swms-exp6cyc exp6acyc 56000 by 50 6000
+cl swms-exp6cyc exp6acyc 56000 yr 50 6000
