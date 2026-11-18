@@ -20,7 +20,12 @@ Eval seeds 6000+ (reserved range, disjoint from all generation seeds).
 each cycle also records the pick, the scores and their parts, and where the
 simulator says every proposal would leave the scene (verifier-MPC's
 cand_oracle, under its field names). The simulator is put back exactly before
-the pick runs, so the episode is the one an unlogged run plays; without the
+the pick runs, so every proposal is rolled out from the state the pick is then
+executed from, and on a host that replays an episode (m5) the episode is bit
+for bit the one an unlogged run plays. The LARG A40 hosts do not replay an
+episode with or without the log: now and then a rendered frame comes back one
+grey level off in a few pixels, and the proposals follow it. There a logged
+run is as close to an unlogged one as a second unlogged run is. Without the
 switch nothing is saved or restored and the output is unchanged.
 
 Usage (m5):
@@ -107,9 +112,10 @@ def run_episode(env, goal, swm, policy_path, cfg, q_app, q_place, q_hold,
             # qvel as in verifier-MPC: a restore from those two changes the
             # steps that follow (stale solver warm start, kinematics a substep
             # ahead), and the episode drifts away from the unlogged one within
-            # a cycle. With the full copy it stays bit-identical
-            # (check_log_cycles_restore.py). The scores above are already fixed
-            # and the policy's observation buffer is not touched.
+            # a cycle. With the full copy it stays bit-identical wherever the
+            # host replays an unlogged episode at all (m5 does, the LARG A40s
+            # do not: check_log_cycles_restore.py). The scores above are
+            # already fixed and the policy's observation buffer is not touched.
             mujoco.mj_copyData(snap, sim._model, sim._data)
             cand_oracle = []
             for c in candidates:
