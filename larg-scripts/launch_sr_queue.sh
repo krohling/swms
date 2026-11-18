@@ -15,6 +15,7 @@
 #   base <checkout> -     -      <task> <episodes> <seed_start>
 #   teacher <checkout> -  -      <task> <episodes> <seed_start>
 #   random  <checkout> -  -      <task> <episodes> <seed_start>
+#   swm  <checkout> <ckpt dir> - <task> <episodes> <seed_start>
 # cl   = eval_closed_loop.py on <run>'s ckpt_step<step>, k=8, as the n=50 sweep.
 #        Result: <checkout>/experiments/<run>_larg/eval_cl_step<step>_<task>_k8.json
 #        for the first block (50 episodes from seed 6000); any other block adds
@@ -39,6 +40,23 @@
 #        48 / 56 / 38 on m5). Queue it on the teacher's seeds.
 #        Result: <checkout>/experiments/random_larg/random_k8_<task>_s<seed_start>n<episodes>/
 #                mpc_random_templadder_k8_L16.json
+# swm  = the authors' own closed-loop eval of a PaliGemma SWM checkpoint (Kevin
+#        2026-11-17: the released jacob3333/paligemma_wm_ogbench at n=200 per
+#        task, the ceiling row; the paper measured it at n=50):
+#        scripts/evaluate_swm_hydra.py with the shipped
+#        configs/eval_gradient_full_ogbench.yaml, i.e. gradient planning on one
+#        base-policy proposal. Only the task, the seeds, the checkpoint path and
+#        the output places are overridden. <ckpt dir> is a directory under
+#        <checkout>/ckpts that also holds the processor files (true of the
+#        released checkpoint, not of our Trainer checkpoints). The script writes
+#        results.txt once, after the last seed, and skips a seed whose
+#        reward.pkl is already there, so a job cut short can be run again.
+#        It runs in the eval venv with one difference: the authors' pinned
+#        transformers 4.57.1 (and the huggingface_hub 0.36.2 it requires) from
+#        swm-followup/pydeps_tf457 ahead of the venv's 5.12.1 on PYTHONPATH,
+#        because the released model code fails under 5.12.1 (see TF457 below).
+#        Simulator, torch and base policy are the ones every other kind uses.
+#        Result: <checkout>/experiments/swm_larg/<ckpt dir>_<task>_s<seed_start>n<episodes>/results.txt
 # <checkout> is a harness checkout under /scratch/cluster/krohling (swms-exp1 =
 # branch pointwise-k1 for exp4, swms-exp6 = exp6-v3b-x4 for exp6). Each job
 # runs from its own checkout with that checkout on PYTHONPATH. <task> is bg, by
@@ -128,6 +146,13 @@ export OMP_NUM_THREADS=8
 # .prod() on the GPU with "CUDA driver error: invalid argument" (the Qwen image
 # path calls it). Keep the cache on scratch, next to the venv it belongs to.
 export PYTORCH_KERNEL_CACHE_PATH=$ROOT/swm-followup/torch_kernel_cache
+# The released PaliGemma SWM code is written for the authors' pinned
+# transformers==4.57.1: under the venv's 5.12.1 its first forward pass dies in
+# create_masks_for_generate (missing inputs_embeds; path check 2026-11-17).
+# 4.57.1 and huggingface_hub 0.36.2 are installed alone in this directory
+# (pip --target --no-deps from the venv's pip); only the swm kind puts it on
+# PYTHONPATH, ahead of the venv, and no other kind ever sees it.
+TF457=$ROOT/swm-followup/pydeps_tf457
 # the teacher's k=8 ladder, as the September result files record it
 TEACHER_TEMPS=0.0,0.2857,0.5714,0.8571,1.1429,1.4286,1.7143,2.0
 # free = <1GB used and <5% util, as everywhere on LARG
@@ -153,6 +178,14 @@ policy_for() {
     bg) echo blue_cube_green_cube ;;
     by) echo blue_cube_yellow_cube ;;
     yr) echo yellow_cube_red_cube ;;
+  esac
+}
+# the same pair as the authors' config spells it (tasks[].block_combo)
+combo_for() {
+  case "$1" in
+    bg) echo blue_cube,green_cube ;;
+    by) echo blue_cube,yellow_cube ;;
+    yr) echo yellow_cube,red_cube ;;
   esac
 }
 is_num() { case "$1" in ""|*[!0-9]*) return 1 ;; esac; }
@@ -189,6 +222,14 @@ job() {
       ckpt=""
       id=random_${task}${sfx}
       out=experiments/random_larg/random_k8_${task}${sfx}/mpc_random_templadder_k8_L16.json ;;
+    swm)
+      case "$run" in ""|-|*/*) return 1 ;; esac
+      ckpt=ckpts/$run
+      [ -f "$JW/$ckpt/model.safetensors.index.json" ] && [ -f "$JW/$ckpt/preprocessor_config.json" ] \
+        && [ -f "$JW/scripts/evaluate_swm_hydra.py" ] && [ -f "$JW/configs/eval_gradient_full_ogbench.yaml" ] \
+        && [ -d "$TF457/transformers-4.57.1.dist-info" ] && [ -d "$TF457/huggingface_hub-0.36.2.dist-info" ] || return 1
+      id=swm_${run}_${task}${sfx}
+      out=experiments/swm_larg/${run}_${task}${sfx}/results.txt ;;
     *) return 1 ;;
   esac
 }
@@ -255,12 +296,22 @@ while :; do
     timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
       --temps $TEACHER_TEMPS --scorer random --lookahead 16 \
       --seeds $eps --seed-start $seed0 --out "$(dirname "$out")" > "$log" 2>&1
+  elif [ $kind = swm ]; then
+    # hydra changes into its run dir; the shipped config resolves its paths
+    # from the launch directory, and the overrides here are absolute
+    PYTHONPATH=$TF457:$PYTHONPATH timeout 10h nice -n 10 $PY scripts/evaluate_swm_hydra.py --config-name eval_gradient_full_ogbench \
+      seed_start=$seed0 num_seeds=$eps \
+      paths.model_ckpt_path=$JW/$ckpt \
+      paths.root_save_path=$JW/$(dirname "$out") \
+      hydra.run.dir=$JW/$(dirname "$out")/hydra \
+      "tasks=[{block_combo:[$(combo_for "$task")],diffusion_path:\"$JW/ckpts/ogbench_base_diffusion/$(policy_for "$task").pt\"}]" \
+      > "$log" 2>&1
   else
     timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
       --k 1 --temps 1.0 --scorer softgate_ema --lookahead 16 \
       --seeds $eps --seed-start $seed0 --out "$(dirname "$out")" > "$log" 2>&1
   fi
-  echo "END $id $HOST g$GPU $(date '+%m-%d %H:%M') $(grep -E 'EVAL_DONE|MPC_DONE|Error|Traceback' "$log" | tail -1)"
+  echo "END $id $HOST g$GPU $(date '+%m-%d %H:%M') $(grep -E 'EVAL_DONE|MPC_DONE|^Success rate|Error|Traceback' "$log" | tail -1)"
   # a job that leaves no result keeps its claim and stops this worker
   [ -f "$out" ] || { echo "WORKER_FAILED $HOST g$GPU $id $(date '+%m-%d %H:%M')"; exit 1; }
   # the claim stays (see the header): mkdir on it fails on every host at once
