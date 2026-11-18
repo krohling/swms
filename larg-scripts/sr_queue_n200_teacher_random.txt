@@ -22,6 +22,12 @@
 #    exp5b-ogbblend-b96-larg, training on debruyne): in swms-exp5,
 #    outputs_swm_lora/exp5b_full is a symlink to exp5b_full_larg, so each one is
 #    picked up when the training run writes it.
+# 8. The released SWM checkpoint (jacob3333/paligemma_wm_ogbench) under the
+#    authors' own eval, 200 episodes per task on the seeds of step 3 (Kevin
+#    2026-11-17: the ceiling row; the paper measured it at n=50), at the very
+#    end. Four 50-episode jobs per task; the three on the paper's seeds
+#    (6000-6049) come first. A worker started from a launcher older than
+#    eff4a21 does not know the swm kind and stops on these lines.
 # kind checkout run step task episodes seed_start
 teacher swms-exp1 - - bg 3 90000
 random swms-exp1 - - bg 3 90003
@@ -301,3 +307,15 @@ cl swms-exp5 exp5b 8000 yr 50 6000
 cl swms-exp5 exp5b 8000 bg 150 6100
 cl swms-exp5 exp5b 8000 by 150 6100
 cl swms-exp5 exp5b 8000 yr 150 6100
+swm swms-exp1 paligemma_wm_ogbench - bg 50 6000
+swm swms-exp1 paligemma_wm_ogbench - by 50 6000
+swm swms-exp1 paligemma_wm_ogbench - yr 50 6000
+swm swms-exp1 paligemma_wm_ogbench - bg 50 6100
+swm swms-exp1 paligemma_wm_ogbench - by 50 6100
+swm swms-exp1 paligemma_wm_ogbench - yr 50 6100
+swm swms-exp1 paligemma_wm_ogbench - bg 50 6150
+swm swms-exp1 paligemma_wm_ogbench - by 50 6150
+swm swms-exp1 paligemma_wm_ogbench - yr 50 6150
+swm swms-exp1 paligemma_wm_ogbench - bg 50 6200
+swm swms-exp1 paligemma_wm_ogbench - by 50 6200
+swm swms-exp1 paligemma_wm_ogbench - yr 50 6200
