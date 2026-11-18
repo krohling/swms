@@ -1,0 +1,21 @@
+# exp6a evaluated with the per-cycle log on (diagnostic, Kevin 2026-11-18: what
+# does a student pick on the cycles where the 8 proposals split?).
+#
+# NOT a training config. The LARG eval queue derives the config, the checkpoint
+# directory and the result directory from the run name and passes the eval no
+# other arguments, so the logged eval of exp6a gets a run name of its own:
+#   outputs_swm_lora/exp6acyc_full  ->  exp6a's checkpoint directory (a link)
+#   experiments/exp6acyc_larg/      <-  results, kept apart from exp6a's rows
+# Below are only the keys eval_closed_loop.py reads, copied from
+# train_exp6a.yaml (the architecture must match the checkpoint being loaded),
+# and the switch.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_targets: all-linear
+learnable_scale: false
+proj_hidden: 512
+traj_cumsum: true
+eval_log_cycles: true
