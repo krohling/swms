@@ -17,6 +17,11 @@
 #    protocol from here on): 150 more episodes per checkpoint on the seeds of
 #    step 3 (6100-6249), latest checkpoint first, after step 5. A checkpoint
 #    that is not on LARG yet is passed over until it is.
+# 7. exp5b 8k grid at n=200 per task (Kevin 2026-11-17), last in the queue,
+#    latest checkpoint first. The checkpoints are the LARG copy's (run
+#    exp5b-ogbblend-b96-larg, training on debruyne): in swms-exp5,
+#    outputs_swm_lora/exp5b_full is a symlink to exp5b_full_larg, so each one is
+#    picked up when the training run writes it.
 # kind checkout run step task episodes seed_start
 teacher swms-exp1 - - bg 3 90000
 random swms-exp1 - - bg 3 90003
@@ -236,3 +241,63 @@ cl swms-exp6 exp6a 16000 yr 150 6100
 cl swms-exp6 exp6a 8000 bg 150 6100
 cl swms-exp6 exp6a 8000 by 150 6100
 cl swms-exp6 exp6a 8000 yr 150 6100
+cl swms-exp5 exp5b 80000 bg 50 6000
+cl swms-exp5 exp5b 80000 by 50 6000
+cl swms-exp5 exp5b 80000 yr 50 6000
+cl swms-exp5 exp5b 80000 bg 150 6100
+cl swms-exp5 exp5b 80000 by 150 6100
+cl swms-exp5 exp5b 80000 yr 150 6100
+cl swms-exp5 exp5b 72000 bg 50 6000
+cl swms-exp5 exp5b 72000 by 50 6000
+cl swms-exp5 exp5b 72000 yr 50 6000
+cl swms-exp5 exp5b 72000 bg 150 6100
+cl swms-exp5 exp5b 72000 by 150 6100
+cl swms-exp5 exp5b 72000 yr 150 6100
+cl swms-exp5 exp5b 64000 bg 50 6000
+cl swms-exp5 exp5b 64000 by 50 6000
+cl swms-exp5 exp5b 64000 yr 50 6000
+cl swms-exp5 exp5b 64000 bg 150 6100
+cl swms-exp5 exp5b 64000 by 150 6100
+cl swms-exp5 exp5b 64000 yr 150 6100
+cl swms-exp5 exp5b 56000 bg 50 6000
+cl swms-exp5 exp5b 56000 by 50 6000
+cl swms-exp5 exp5b 56000 yr 50 6000
+cl swms-exp5 exp5b 56000 bg 150 6100
+cl swms-exp5 exp5b 56000 by 150 6100
+cl swms-exp5 exp5b 56000 yr 150 6100
+cl swms-exp5 exp5b 48000 bg 50 6000
+cl swms-exp5 exp5b 48000 by 50 6000
+cl swms-exp5 exp5b 48000 yr 50 6000
+cl swms-exp5 exp5b 48000 bg 150 6100
+cl swms-exp5 exp5b 48000 by 150 6100
+cl swms-exp5 exp5b 48000 yr 150 6100
+cl swms-exp5 exp5b 40000 bg 50 6000
+cl swms-exp5 exp5b 40000 by 50 6000
+cl swms-exp5 exp5b 40000 yr 50 6000
+cl swms-exp5 exp5b 40000 bg 150 6100
+cl swms-exp5 exp5b 40000 by 150 6100
+cl swms-exp5 exp5b 40000 yr 150 6100
+cl swms-exp5 exp5b 32000 bg 50 6000
+cl swms-exp5 exp5b 32000 by 50 6000
+cl swms-exp5 exp5b 32000 yr 50 6000
+cl swms-exp5 exp5b 32000 bg 150 6100
+cl swms-exp5 exp5b 32000 by 150 6100
+cl swms-exp5 exp5b 32000 yr 150 6100
+cl swms-exp5 exp5b 24000 bg 50 6000
+cl swms-exp5 exp5b 24000 by 50 6000
+cl swms-exp5 exp5b 24000 yr 50 6000
+cl swms-exp5 exp5b 24000 bg 150 6100
+cl swms-exp5 exp5b 24000 by 150 6100
+cl swms-exp5 exp5b 24000 yr 150 6100
+cl swms-exp5 exp5b 16000 bg 50 6000
+cl swms-exp5 exp5b 16000 by 50 6000
+cl swms-exp5 exp5b 16000 yr 50 6000
+cl swms-exp5 exp5b 16000 bg 150 6100
+cl swms-exp5 exp5b 16000 by 150 6100
+cl swms-exp5 exp5b 16000 yr 150 6100
+cl swms-exp5 exp5b 8000 bg 50 6000
+cl swms-exp5 exp5b 8000 by 50 6000
+cl swms-exp5 exp5b 8000 yr 50 6000
+cl swms-exp5 exp5b 8000 bg 150 6100
+cl swms-exp5 exp5b 8000 by 150 6100
+cl swms-exp5 exp5b 8000 yr 150 6100
