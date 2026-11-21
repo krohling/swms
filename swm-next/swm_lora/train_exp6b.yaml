@@ -1,0 +1,44 @@
+# Experiment 6b (Kevin 2026-11-20): the batch-size control for exp6a. exp6a
+# differs from exp4b in two things at once: 4x the data, and 96 examples per
+# optimizer step for 80,367 steps where exp4b took 12 per step for 3 passes.
+# This run keeps exp6a's recipe and takes the data back to exp4b's.
+#
+# Changes vs train_exp6a.yaml, nothing else:
+#   h5_paths   the original v3b file only (seeds 60000-65399). With exp4b's
+#              fixed val split the train set is exp4b's own, 373,570 examples.
+#   run_name, out_dir
+# 7.7M draws over 373,570 examples is about 20.7 passes (exp6a: about 5), so
+# the late checkpoints carry that repetition as well as the batch size. The 8k
+# and 16k checkpoints sit at 2.1 and 4.1 passes, either side of exp4b's 3:
+# the batch size alone is read there.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths:
+  - datasets_swm/bg_v3b_k8uni_s60000.h5
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+fixed_val_split: swm-next/swm_lora/splits/exp4b_split.json
+total_steps: 80367
+micro_cycles: 16
+accum_cycles: 6                # eff 96 examples/step (exp1b: 12 lists x 8)
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/exp4b_warmup_v3b/ckpt_step5250
+learning_rate: 1.0e-4          # exp1b's value at this batch size
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 1000
+val_max_lists: 2000
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp6b-v3b1x-b96
+out_dir: outputs_swm_lora/exp6b_full

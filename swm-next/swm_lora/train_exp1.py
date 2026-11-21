@@ -20,8 +20,9 @@ Data: questions are enumerated from the dataset files themselves; cfg
 Validation: loss/MAE, within-cycle Spearman rho (rank correlation across each
 held-out cycle's siblings), and a base-drift probe (empty-trajectory p_yes vs
 step-0 outputs). Checkpoints: eval/export adapters every ckpt_every steps
-(wandb artifacts) + atomic full resume states (optimizer/scheduler/RNG,
-keep-2); --resume auto restarts from the newest valid state.
+(wandb artifacts, except with WANDB_MODE=offline) + atomic full resume states
+(optimizer/scheduler/RNG, keep-2); --resume auto restarts from the newest
+valid state.
 
 Usage:
   python swm-next/swm_lora/train_exp1.py --config swm-next/swm_lora/train_exp1.yaml
@@ -248,11 +249,14 @@ def main():
         if step % ckpt_every == 0 or step == total_steps:
             cdir = f"{out}/ckpt_step{step}"
             model.save_adapters(cdir)
-            import wandb as _w
-            art = _w.Artifact("swm-lora-exp1-ckpt", type="model",
-                              metadata=dict(step=step))
-            art.add_dir(cdir)
-            run.log_artifact(art, aliases=[f"step{step}"])
+            # an offline run keeps its checkpoints on disk only: an artifact
+            # stages a second copy of each one until the run is synced
+            if os.environ.get("WANDB_MODE") != "offline":
+                import wandb as _w
+                art = _w.Artifact("swm-lora-exp1-ckpt", type="model",
+                                  metadata=dict(step=step))
+                art.add_dir(cdir)
+                run.log_artifact(art, aliases=[f"step{step}"])
         if step % resume_every == 0 or step == total_steps:
             cdir = f"{out}/ckpt_step{step}"
             if not os.path.exists(cdir):
