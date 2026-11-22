@@ -1,0 +1,38 @@
+# LangTable verifier-MPC dev/eval container (linux/arm64 or amd64).
+#
+# Why a container: pybullet 3.2.7 fails to compile under Apple clang >= 21
+# (K&R-era C in its bundled zlib); Linux gcc builds it fine. The env stack
+# (pybullet + TF + tf-agents + language_table) is CPU-only here — the VLM
+# judge runs OUTSIDE (host MPS or a GPU box) behind an HTTP p_yes endpoint.
+#
+# Build   (from workspace/ dir, with swms/ and language-table/ checked out):
+#   docker build -f swms/swm-next/verifier/Dockerfile.langtable -t lt-verifier .
+# Run:
+#   docker run -it -v "$PWD":/workspace -w /workspace/swms \
+#     -e TF_USE_LEGACY_KERAS=1 -e PYTHONPATH=/workspace/swms lt-verifier bash
+#
+# language-table = github.com/krohling/language-table (Jacob Berg's fork with
+# LanguageTableDataGeneration + get_pybullet_state/set_pybullet_state).
+
+FROM python:3.12
+
+# core env stack; gym 0.23 needs the setuptools distutils shim on py3.12
+RUN pip install --no-cache-dir setuptools && \
+    pip install --no-cache-dir pybullet "gym==0.23.0" numpy scipy six \
+        opencv-python-headless matplotlib protobuf pillow gymnasium
+
+# TF + the GymWrapper. tf-agents is installed --no-deps: its pins
+# (pygame==2.1.3, typing-extensions==4.5.0) fail to build / conflict with
+# modern TF, and we only use tf_agents.environments.gym_wrapper.
+RUN pip install --no-cache-dir tensorflow tf-keras tensorflow-probability && \
+    pip install --no-cache-dir --no-deps tf-agents && \
+    pip install --no-cache-dir gin-config cloudpickle absl-py wrapt
+
+# torch (CPU) + transformers: needed by swm package imports and the diffusion
+# policy. The judge model itself is NOT loaded in-container.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir transformers diffusers
+
+# language_table (editable, --no-deps: its requirements pin tf-nightly etc.)
+# Expects the fork mounted/copied at /workspace/language-table.
+ENV TF_USE_LEGACY_KERAS=1
