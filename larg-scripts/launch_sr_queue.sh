@@ -155,6 +155,11 @@ export OMP_NUM_THREADS=8
 # .prod() on the GPU with "CUDA driver error: invalid argument" (the Qwen image
 # path calls it). Keep the cache on scratch, next to the venv it belongs to.
 export PYTORCH_KERNEL_CACHE_PATH=$ROOT/swm-followup/torch_kernel_cache
+# matplotlib's font cache defaults to ~/.cache/matplotlib, and the LARG home is
+# at its quota (2026-11-22: importing the LangTable eval died there with "Disk
+# quota exceeded"). Same cure: keep it on scratch.
+export MPLCONFIGDIR=$ROOT/swm-followup/mpl_cache
+mkdir -p $MPLCONFIGDIR
 # The released PaliGemma SWM code is written for the authors' pinned
 # transformers==4.57.1: under the venv's 5.12.1 its first forward pass dies in
 # create_masks_for_generate (missing inputs_embeds; path check 2026-11-17).
