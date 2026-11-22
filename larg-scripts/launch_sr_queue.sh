@@ -57,6 +57,15 @@
 #        because the released model code fails under 5.12.1 (see TF457 below).
 #        Simulator, torch and base policy are the ones every other kind uses.
 #        Result: <checkout>/experiments/swm_larg/<ckpt dir>_<task>_s<seed_start>n<episodes>/results.txt
+# swmlt = the same eval on LangTable (Kevin 2026-11-21: the released
+#        jacob3333/paligemma_wm_lt at n=200 per task): the shipped
+#        configs/eval_gradient_full.yaml, one of its five tasks per job. <task>
+#        is gcbm, rmgs, rpbm, yprm or ysbc (see lt_combo_for). The base
+#        policies are the authors' lt_base_diffusion files in the
+#        swm-followup/swms checkout (1.8 GB, not copied per checkout), and the
+#        simulator is the language-table checkout beside it, on PYTHONPATH.
+#        Same venv and transformers 4.57.1 overlay as swm.
+#        Result: <checkout>/experiments/swmlt_larg/<ckpt dir>_<task>_s<seed_start>n<episodes>/results.txt
 # <checkout> is a harness checkout under /scratch/cluster/krohling (swms-exp1 =
 # branch pointwise-k1 for exp4, swms-exp6 = exp6-v3b-x4 for exp6). Each job
 # runs from its own checkout with that checkout on PYTHONPATH. <task> is bg, by
@@ -188,12 +197,38 @@ combo_for() {
     yr) echo yellow_cube,red_cube ;;
   esac
 }
+# LangTable: the five tasks of the authors' eval_gradient_full.yaml
+lt_combo_for() {
+  case "$1" in
+    gcbm) echo green_cube,blue_moon ;;
+    rmgs) echo red_moon,green_star ;;
+    rpbm) echo red_pentagon,blue_moon ;;
+    yprm) echo yellow_pentagon,red_moon ;;
+    ysbc) echo yellow_star,blue_cube ;;
+  esac
+}
+LTPOL=$ROOT/swm-followup/swms/ckpts/lt_base_diffusion
+LTSIM=$ROOT/swm-followup/language-table
 is_num() { case "$1" in ""|*[!0-9]*) return 1 ;; esac; }
 # one queue line -> JW (its checkout), id (claim and log name), out and ckpt
 # (both relative to JW), sweep_claim (launch_sr_sweep.sh's claim on the same
 # job, empty when there cannot be one); non-zero on a line that cannot be run
 job() {
   kind=$1; co=$2; run=$3; step=$4; task=$5; eps=$6; seed0=$7
+  if [ "$kind" = swmlt ]; then
+    [ -n "$co" ] && [ -n "$(lt_combo_for "$task")" ] && is_num "$eps" && is_num "$seed0" || return 1
+    case "$run" in ""|-|*/*) return 1 ;; esac
+    JW=$ROOT/$co
+    ckpt=ckpts/$run
+    [ -f "$JW/$ckpt/model.safetensors.index.json" ] && [ -f "$JW/$ckpt/preprocessor_config.json" ] \
+      && [ -f "$JW/scripts/evaluate_swm_hydra.py" ] && [ -f "$JW/configs/eval_gradient_full.yaml" ] \
+      && [ -f "$LTPOL/$(lt_combo_for "$task" | tr , _).pt" ] && [ -d "$LTSIM/language_table" ] \
+      && [ -d "$TF457/transformers-4.57.1.dist-info" ] && [ -d "$TF457/huggingface_hub-0.36.2.dist-info" ] || return 1
+    sweep_claim=""
+    id=swmlt_${run}_${task}_s${seed0}n${eps}
+    out=experiments/swmlt_larg/${run}_${task}_s${seed0}n${eps}/results.txt
+    return 0
+  fi
   [ -n "$co" ] && [ -n "$(cfg_for "$task")" ] && is_num "$eps" && is_num "$seed0" || return 1
   JW=$ROOT/$co
   [ -f "$JW/$(cfg_for "$task")" ] && [ -f "$JW/ckpts/ogbench_base_diffusion/$(policy_for "$task").pt" ] || return 1
@@ -277,9 +312,11 @@ while :; do
   claim=$LOGDIR/claims/$id
   echo "$HOST g$GPU $(date '+%m-%d %H:%M')" > $claim/owner
   log=$LOGDIR/$id.log
-  cfg=$LOGDIR/cfg/${HOST}_g${GPU}_${task}.yaml
-  sed "s/^device:.*/device: cuda/" "$JW/$(cfg_for "$task")" > $cfg
-  grep -q "^device: cuda" $cfg || { echo "WORKER_FAILED $HOST g$GPU no device key in $cfg"; exit 2; }
+  if [ $kind != swmlt ]; then
+    cfg=$LOGDIR/cfg/${HOST}_g${GPU}_${task}.yaml
+    sed "s/^device:.*/device: cuda/" "$JW/$(cfg_for "$task")" > $cfg
+    grep -q "^device: cuda" $cfg || { echo "WORKER_FAILED $HOST g$GPU no device key in $cfg"; exit 2; }
+  fi
   cd $JW
   export PYTHONPATH=$JW:$JW/swm-next
   mkdir -p "$(dirname "$out")"
@@ -305,6 +342,16 @@ while :; do
       paths.root_save_path=$JW/$(dirname "$out") \
       hydra.run.dir=$JW/$(dirname "$out")/hydra \
       "tasks=[{block_combo:[$(combo_for "$task")],diffusion_path:\"$JW/ckpts/ogbench_base_diffusion/$(policy_for "$task").pt\"}]" \
+      > "$log" 2>&1
+  elif [ $kind = swmlt ]; then
+    # the script skips a seed whose reward.pkl is there, so a job the timeout
+    # cuts short can be run again (delete its claim)
+    PYTHONPATH=$TF457:$LTSIM:$PYTHONPATH timeout 30h nice -n 10 $PY scripts/evaluate_swm_hydra.py --config-name eval_gradient_full \
+      seed_start=$seed0 num_seeds=$eps \
+      paths.model_ckpt_path=$JW/$ckpt \
+      paths.root_save_path=$JW/$(dirname "$out") \
+      hydra.run.dir=$JW/$(dirname "$out")/hydra \
+      "tasks=[{block_combo:[$(lt_combo_for "$task")],diffusion_path:\"$LTPOL/$(lt_combo_for "$task" | tr , _).pt\"}]" \
       > "$log" 2>&1
   else
     timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \

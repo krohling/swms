@@ -1,0 +1,19 @@
+# Released PaliGemma SWM checkpoint on LangTable (Kevin 2026-11-21).
+# kind checkout run step task episodes seed_start
+# Path check and timing first: 2 seeds per task, in their own result dirs (not results).
+swmlt swms-exp1 paligemma_wm_lt - gcbm 2 6000
+swmlt swms-exp1 paligemma_wm_lt - rmgs 2 6000
+swmlt swms-exp1 paligemma_wm_lt - rpbm 2 6000
+swmlt swms-exp1 paligemma_wm_lt - yprm 2 6000
+swmlt swms-exp1 paligemma_wm_lt - ysbc 2 6000
+# The n=200 row: seeds 6000-6049 and 6100-6249 (6050-6099 stay held).
+swmlt swms-exp1 paligemma_wm_lt - gcbm 50 6000
+swmlt swms-exp1 paligemma_wm_lt - rmgs 50 6000
+swmlt swms-exp1 paligemma_wm_lt - rpbm 50 6000
+swmlt swms-exp1 paligemma_wm_lt - yprm 50 6000
+swmlt swms-exp1 paligemma_wm_lt - ysbc 50 6000
+swmlt swms-exp1 paligemma_wm_lt - gcbm 150 6100
+swmlt swms-exp1 paligemma_wm_lt - rmgs 150 6100
+swmlt swms-exp1 paligemma_wm_lt - rpbm 150 6100
+swmlt swms-exp1 paligemma_wm_lt - yprm 150 6100
+swmlt swms-exp1 paligemma_wm_lt - ysbc 150 6100
