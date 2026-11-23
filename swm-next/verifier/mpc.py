@@ -797,8 +797,16 @@ def main():
                     help="asymmetric EMA: constant used when the gate RISES. "
                          "Smaller = smoother against false dips. Defaults to "
                          "--gate-alpha.")
+    ap.add_argument("--set", action="append", default=[], dest="overrides",
+                    metavar="KEY=VALUE",
+                    help="override a config key (yaml-parsed value), e.g. "
+                         "--set device=mps --set judge_url=null for a native "
+                         "run with the judge in-process")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    for kv in args.overrides:
+        key, val = kv.split("=", 1)
+        cfg[key] = yaml.safe_load(val)
 
     import sys
     sys.dont_write_bytecode = True
