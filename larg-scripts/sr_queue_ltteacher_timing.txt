@@ -1,0 +1,2 @@
+# LangTable teacher (k=8, L48) path check and timing: 2 episodes
+ltteacher swms-ltteacher - - gcbm 2 6000

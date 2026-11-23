@@ -16,6 +16,8 @@
 #   teacher <checkout> -  -      <task> <episodes> <seed_start>
 #   random  <checkout> -  -      <task> <episodes> <seed_start>
 #   swm  <checkout> <ckpt dir> - <task> <episodes> <seed_start>
+#   swmlt <checkout> <ckpt dir> - <task> <episodes> <seed_start>
+#   ltteacher <checkout> - -     <task> <episodes> <seed_start>
 # cl   = eval_closed_loop.py on <run>'s ckpt_step<step>, k=8, as the n=50 sweep.
 #        Result: <checkout>/experiments/<run>_larg/eval_cl_step<step>_<task>_k8.json
 #        for the first block (50 episodes from seed 6000); any other block adds
@@ -66,6 +68,20 @@
 #        simulator is the language-table checkout beside it, on PYTHONPATH.
 #        Same venv and transformers 4.57.1 overlay as swm.
 #        Result: <checkout>/experiments/swmlt_larg/<ckpt dir>_<task>_s<seed_start>n<episodes>/results.txt
+# ltteacher = the Qwen teacher on LangTable (Kevin 2026-11-21: base, teacher
+#        and released checkpoint at n=200 per task): verifier/mpc.py's LangTable
+#        path with the October "verifier k=8, L48" configuration (39.2 at n=50
+#        per task on m5): 8 base-policy proposals on the teacher's temperature
+#        ladder, each rolled out 48 steps in the simulator, the zero-shot Qwen
+#        judge scores the end frames (--scorer verifier) and the best proposal
+#        is executed. <checkout> needs the LangTable port and mpc.py's --set
+#        flag (swms-ltteacher = branch teacher-langtable); the config's Docker
+#        settings are overridden on the command line (policy on the GPU, judge
+#        in-process). Same tasks, base policies and simulator checkout as
+#        swmlt; the venv's own transformers. mpc.py writes its result once,
+#        after the last episode, and cannot resume: queue short seed blocks.
+#        Result: <checkout>/experiments/ltteacher_larg/teacher_k8_L48_<task>_s<seed_start>n<episodes>/
+#                mpc_lt_verifier_templadder_L48_k8.json
 # <checkout> is a harness checkout under /scratch/cluster/krohling (swms-exp1 =
 # branch pointwise-k1 for exp4, swms-exp6 = exp6-v3b-x4 for exp6). Each job
 # runs from its own checkout with that checkout on PYTHONPATH. <task> is bg, by
@@ -234,6 +250,18 @@ job() {
     out=experiments/swmlt_larg/${run}_${task}_s${seed0}n${eps}/results.txt
     return 0
   fi
+  if [ "$kind" = ltteacher ]; then
+    [ -n "$co" ] && [ -n "$(lt_combo_for "$task")" ] && is_num "$eps" && is_num "$seed0" || return 1
+    JW=$ROOT/$co
+    ckpt=""
+    ltc=$(lt_combo_for "$task" | tr , _)
+    [ -f "$JW/swm-next/configs/verifier_mpc_lt_$ltc.yaml" ] && grep -q '"--set"' "$JW/swm-next/verifier/mpc.py" \
+      && [ -f "$LTPOL/$ltc.pt" ] && [ -d "$LTSIM/language_table" ] || return 1
+    sweep_claim=""
+    id=ltteacher_${task}_s${seed0}n${eps}
+    out=experiments/ltteacher_larg/teacher_k8_L48_${task}_s${seed0}n${eps}/mpc_lt_verifier_templadder_L48_k8.json
+    return 0
+  fi
   [ -n "$co" ] && [ -n "$(cfg_for "$task")" ] && is_num "$eps" && is_num "$seed0" || return 1
   JW=$ROOT/$co
   [ -f "$JW/$(cfg_for "$task")" ] && [ -f "$JW/ckpts/ogbench_base_diffusion/$(policy_for "$task").pt" ] || return 1
@@ -317,7 +345,7 @@ while :; do
   claim=$LOGDIR/claims/$id
   echo "$HOST g$GPU $(date '+%m-%d %H:%M')" > $claim/owner
   log=$LOGDIR/$id.log
-  if [ $kind != swmlt ]; then
+  if [ $kind != swmlt ] && [ $kind != ltteacher ]; then
     cfg=$LOGDIR/cfg/${HOST}_g${GPU}_${task}.yaml
     sed "s/^device:.*/device: cuda/" "$JW/$(cfg_for "$task")" > $cfg
     grep -q "^device: cuda" $cfg || { echo "WORKER_FAILED $HOST g$GPU no device key in $cfg"; exit 2; }
@@ -358,6 +386,12 @@ while :; do
       hydra.run.dir=$JW/$(dirname "$out")/hydra \
       "tasks=[{block_combo:[$(lt_combo_for "$task")],diffusion_path:\"$LTPOL/$(lt_combo_for "$task" | tr , _).pt\"}]" \
       > "$log" 2>&1
+  elif [ $kind = ltteacher ]; then
+    PYTHONPATH=$LTSIM:$PYTHONPATH:$JW/swm-next/verifier timeout 40h nice -n 10 $PY swm-next/verifier/mpc.py \
+      --config swm-next/configs/verifier_mpc_lt_$ltc.yaml \
+      --set device=cuda --set judge_url=null --set diffusion_path=$LTPOL/$ltc.pt \
+      --temps $TEACHER_TEMPS --scorer verifier --lookahead 48 \
+      --seeds $eps --seed-start $seed0 --out "$(dirname "$out")" > "$log" 2>&1
   else
     timeout 5h nice -n 10 $PY swm-next/verifier/mpc.py --config $cfg \
       --k 1 --temps 1.0 --scorer softgate_ema --lookahead 16 \
