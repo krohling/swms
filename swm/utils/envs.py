@@ -11,6 +11,11 @@ class LangTableEnv(BaseEnv):
         current_frame = np.array(ts.observation["rgb"])
         return current_frame
 
+    def step_norender(self, action):
+        """Advance robot + physics exactly as step() does, without the camera
+        render and observation (for rollout steps whose frame nobody reads)."""
+        self.env.gym._step_robot_and_sim(action)
+
     def get_state(self):
         return self.env.get_pybullet_state()
 

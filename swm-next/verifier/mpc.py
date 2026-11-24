@@ -574,6 +574,9 @@ def run_lt_episode(env, goal, judge, cfg, args, seed, detail_dir=None,
     questions = build_lt_questions(goal)
     probe = LTProbe(env, goal)
     n_exec = cfg["actions_per_cycle"]
+    # saved rollout videos need every frame, so --save-frames renders them all
+    skip = bool(cfg.get("render_skip", False)) and detail_dir is None
+    n_obs = policy.obs_deque.maxlen
     log = []
     ep_dir = None
     if detail_dir is not None:
@@ -617,22 +620,33 @@ def run_lt_episode(env, goal, judge, cfg, args, seed, detail_dir=None,
                     with policy._lock:
                         buf = deque(policy.obs_deque,
                                     maxlen=policy.obs_deque.maxlen)
-                for a in c:
-                    f = env.step(np.asarray(a))
-                    if cand_frames is not None:
-                        cand_frames.append(np.asarray(f, dtype=np.uint8))
-                    if deep:
-                        policy.add_obs(f)
+
+                def roll(acts, add, resample_after):
+                    # render_skip: the camera render is ~2/3 of a sim step and
+                    # a rollout frame is read only by the policy at its next
+                    # resample (the last obs_horizon frames); the judge gets
+                    # its own render of the end state. Skip the rest.
+                    nonlocal f
+                    n = len(acts)
+                    for i, a in enumerate(acts):
+                        if skip and not (add and resample_after
+                                         and i >= n - n_obs):
+                            env.step_norender(np.asarray(a))
+                            continue
+                        f = env.step(np.asarray(a))
+                        if cand_frames is not None:
+                            cand_frames.append(np.asarray(f, dtype=np.uint8))
+                        if add:
+                            policy.add_obs(f)
+
+                roll(c, deep, deep)
                 done_steps = len(c)
                 while done_steps < args.lookahead:
                     torch.manual_seed(hash((seed, cycle, ci, done_steps)) % 2**31)
                     chunk = policy.get_action()
-                    for a in chunk[: args.lookahead - done_steps]:
-                        f = env.step(np.asarray(a))
-                        if cand_frames is not None:
-                            cand_frames.append(np.asarray(f, dtype=np.uint8))
-                        policy.add_obs(f)
-                    done_steps += min(len(chunk), args.lookahead - done_steps)
+                    acts = chunk[: args.lookahead - done_steps]
+                    roll(acts, True, done_steps + len(acts) < args.lookahead)
+                    done_steps += len(acts)
                 if deep:
                     with policy._lock:
                         policy.obs_deque.clear()
@@ -724,16 +738,30 @@ def main_lt(args, cfg):
     seed0 = args.seed_start if args.seed_start is not None else cfg["seed_start"]
     seeds = [seed0 + i for i in range(args.seeds)]
     results, wins = [], 0
-    for done_n, seed in enumerate(seeds, 1):
+    # an n=200 row is days of sim: keep each finished episode so a restarted
+    # block picks up where it stopped (episodes reseed everything themselves)
+    part = os.path.join(args.out, f"mpc_{tag}_k{args.k}.partial.jsonl")
+    if os.path.exists(part):
+        results = [json.loads(l) for l in open(part) if l.strip()]
+        wins = sum(r["success"] for r in results)
+        print(f"resuming: {len(results)} episodes from {part}", flush=True)
+    have = {r["seed"] for r in results}
+    for seed in seeds:
+        if seed in have:
+            continue
         success, cycles, log = run_lt_episode(
             env, goal, judge, cfg, args, seed,
             detail_dir=detail_dir, temps=temps)
         wins += success
         results.append(dict(seed=seed, success=bool(success), cycles=cycles,
                             log=log))
+        with open(part, "a") as fh:
+            fh.write(json.dumps(results[-1]) + "\n")
+        done_n = len(results)
         print(f"[{done_n}/{args.seeds}] seed {seed}: "
               f"{'success' if success else 'fail'} @ cycle {cycles} "
               f"(running SR {wins/done_n:.0%})", flush=True)
+    results.sort(key=lambda r: r["seed"])
     out = dict(k=args.k, scorer=args.scorer, env="lang_table",
                block_combo=list(cfg["block_combo"]), temps=temps,
                n=args.seeds, sr=wins / args.seeds, episodes=results)

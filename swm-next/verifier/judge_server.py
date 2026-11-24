@@ -8,7 +8,9 @@ cannot load the VLM — can score frames. Counterpart: http_judge.HTTPJudge.
 
 Run (host):  python swm-next/verifier/judge_server.py \
                  --model Qwen/Qwen3-VL-8B-Instruct --device mps --port 8901
-The container reaches it at http://host.docker.internal:8901.
+Listens on 127.0.0.1 only by default (native workers on the same machine use
+http://127.0.0.1:8901). A container reaching it at host.docker.internal needs
+--host set to an address the container can see.
 Batches are chunked to --batch internally (single forward per chunk).
 """
 import argparse
@@ -30,6 +32,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="Qwen/Qwen3-VL-8B-Instruct")
     ap.add_argument("--device", default="mps")
+    ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8901)
     ap.add_argument("--batch", type=int, default=8)
     args = ap.parse_args()
@@ -76,8 +79,13 @@ def main():
             self.send_response(200 if self.path == "/health" else 404)
             self.end_headers()
 
-    print(f"serving on :{args.port}", flush=True)
-    HTTPServer(("0.0.0.0", args.port), H).serve_forever()
+    class Server(HTTPServer):
+        # requests are served one at a time; many planner processes may
+        # connect at once, so let them queue instead of being refused
+        request_queue_size = 128
+
+    print(f"serving on {args.host}:{args.port}", flush=True)
+    Server((args.host, args.port), H).serve_forever()
 
 
 if __name__ == "__main__":
