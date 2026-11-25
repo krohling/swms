@@ -7,8 +7,8 @@
 # ahead as its checkpoints are staged). launch_sr_sweep.sh stays as the record
 # of the n=50 exp4 sweep; this is the same worker with the job spelled out per
 # queue line instead of fixed in the script, and the same launch guards: idle
-# re-check, GPU pinning by UUID, host-load guard, >=1 GPU left free, offline
-# HF cache, EGL rendering, nice, detached tmux session.
+# re-check, GPU pinning by UUID, host-load guard, offline HF cache, EGL
+# rendering, nice, detached tmux session.
 #
 # Queue lines, in priority order ("#" lines and blank lines are skipped):
 #   cl   <checkout> <run> <step> <task> <episodes> <seed_start>
@@ -96,9 +96,10 @@
 # up to a minute after the result is written (NFS attribute cache), and a claim
 # removed in that window let salah repeat pulisic's base_yr_s6400n150 on
 # 2026-11-17. To run a job again, delete its result and its claim.
-# The host-load and >=1-free-GPU guards are acquisition rules (Kevin
-# 2026-11-16): they are checked once, at launch, and a worker that has its GPU
-# keeps it between jobs. Before each job a worker only re-checks that nobody
+# The host-load guard is an acquisition rule (Kevin 2026-11-16): it is checked
+# once, at launch, and a worker that has its GPU keeps it between jobs. The
+# rule that a launch had to leave >=1 other GPU free on the host was dropped
+# (Kevin 2026-11-24). Before each job a worker only re-checks that nobody
 # else is on its GPU, and it stops rather than waits or retries when the GPU
 # has been taken or a job leaves no result (that job's claim stays, so no other
 # worker repeats it). `touch <log dir>/STOP` ends every worker launched before
@@ -192,7 +193,7 @@ gpu_free() {
   ut=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits -i $1)
   [ "$mu" -lt 1024 ] 2>/dev/null && [ "$ut" -lt 5 ] 2>/dev/null
 }
-# host load and >=1 free GPU are checked at launch only: a worker keeps its GPU
+# host load is checked at launch only: a worker keeps its GPU
 guard() {
   gpu_free $GPU || { echo "GPU $GPU is in use"; return 1; }
 }
@@ -433,17 +434,10 @@ if [ $MODE = keep ]; then
 fi
 gpu_free $GPU || { echo "GPU $GPU busy on $HOST — refusing"; exit 1; }
 if [ $MODE = launch ]; then
-  # acquisition guards, checked here only: host load under half the cores
-  # (nproc alone would return OMP_NUM_THREADS), >=1 other GPU left free
-  # (Kevin 2026-11-02)
+  # acquisition guard, checked here only: host load under half the cores
+  # (nproc alone would return OMP_NUM_THREADS)
   CORES=$(nproc --all); LOAD=$(cut -d" " -f1 /proc/loadavg)
   awk -v c="$CORES" -v l="$LOAD" 'BEGIN{exit !(l < c/2)}' || { echo "host load $LOAD too high"; exit 1; }
-  FREE_OTHERS=0
-  for g in $(seq 0 $(($(nvidia-smi -L | wc -l) - 1))); do
-    [ "$g" -eq "$GPU" ] && continue
-    if gpu_free $g; then FREE_OTHERS=$((FREE_OTHERS + 1)); fi
-  done
-  [ "$FREE_OTHERS" -ge 1 ] || { echo "GPU $GPU would leave 0 free GPUs on $HOST — refusing (keep >=1 open)"; exit 1; }
 fi
 tmux new-session -d -s sr8k-g$GPU "$WORKER 2>&1 | tee -a $LOGDIR/worker_${HOST}_g${GPU}.log"
 echo "launched eval-queue worker in tmux:sr8k-g$GPU on $HOST GPU $GPU ($UUID, EGL device $EGL_ID), queue $Q"
