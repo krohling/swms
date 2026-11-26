@@ -4,9 +4,11 @@ Structure and label checks need only h5py. --replay N also needs the
 simulator: for N cycles of every episode the stored state at t is restored,
 the stored frame is re-rendered and the picked chunk is rolled out again,
 then compared with what the file holds. That replay starts from set_state
-alone (the engine snapshot of the generating process is gone), so the end
-state is compared with a tolerance, not bit for bit; the generator's own
---restore-check-cycles is the exact determinism gate.
+alone (the engine snapshot of the generating process is gone), which is not
+a complete restore, so it guards only against a stored state, chunk or frame
+that belongs to another cycle; repeatability itself is the generator's own
+--restore-check-cycles (a rollout repeated from one engine snapshot, held to
+1e-4 m; see datagen_lt.py), whose per-episode result this verifier reads.
 
 Prints one line per check, then a STATS json line; exit code 1 on any FAIL.
 
@@ -29,12 +31,15 @@ EXPECT = dict(  # dataset -> trailing shape after the cycle axis (None = vlen)
 DONE_DIST = 0.065          # the task's done test (block centers)
 EDGE = 1e-4                # stored distances are float32: ignore ties at the line
 FRAME_TOL = 4.0            # mean |re-render - stored JPEG| per channel, 0-255
-# Replayed end state vs stored. A replay from set_state alone drifts wherever
-# the rollout has block contact (2 dry-run episodes: median 3e-5 m, 1 cycle
-# of 12 at 1.9 cm), while a wrong chunk or a wrong state moves the arm by
-# centimeters in nearly every cycle. So: the median must be tight, and most
-# cycles must be near.
-END_MEDIAN_TOL = 1e-3      # m
+# Replayed end state vs stored. A replay from set_state alone drifts (LARG,
+# Nov 26, 288 replays against the snapshot rollout, 6 seeds, 5 tasks: median
+# 5e-4 m, 96% within 5 mm, max 1.1 cm; per-seed medians 3e-6 to 9e-4), while
+# another proposal's chunk ends a median 1.9 cm away and within 1 cm in only
+# 23% of 36,729 cases. A unit of the smoke replays 8 cycles: resampled
+# medians of 8 stay under 3.1 mm in 99.9% of draws (of 108, a batch unit,
+# under 0.9 mm), and 6 of 8 within 1 cm is the worst draw. So: the median
+# under 5 mm, and most cycles near.
+END_MEDIAN_TOL = 5e-3      # m
 END_TOL = 0.01             # m
 END_NEAR_SHARE = 0.75
 
@@ -94,13 +99,15 @@ def main():
         rep(sorted(want) == have, "episode set",
             f"{len(have)} groups, expected {len(want)}")
 
-        n_cyc = n_succ = 0
+        n_cyc = n_succ = n_chk = n_chk_bad = n_chk_eps = 0
+        chk_pos = 0.0
         picks = np.zeros(max(k, 1), np.int64)
         P, M, O_t, O_end, DONE = [], [], [], [], []
         struct_bad, value_bad, chain_bad = [], [], []
         frame_bytes = 0
         questions = set()
-        for name in [n for n in want if n in h5]:
+        names_ok = [n for n in want if n in h5]
+        for name in names_ok:
             g = h5[name]
             ga = dict(g.attrs)
             C = int(ga.get("cycles", -1))
@@ -170,6 +177,10 @@ def main():
             np.add.at(picks, pick, 1)
             n_cyc += C
             n_succ += succ
+            n_chk += int(ga.get("check_cycles", 0))
+            n_chk_bad += int(ga.get("check_bad", 0))
+            n_chk_eps += int(ga.get("check_cycles", 0)) > 0
+            chk_pos = max(chk_pos, float(ga.get("check_max_pos", 0.0)))
             P.append(lab[:, 0, :2]); M.append(mass[:, 0])
             O_t.append(ot); O_end.append(oe); DONE.append(g["end_done"][:, 0])
 
@@ -178,6 +189,12 @@ def main():
         rep(not chain_bad, "cycle order", "; ".join(chain_bad[:3]))
         rep(len(questions) == 1, "one question pair per file",
             str(sorted(questions))[:160])
+        # every episode carries the generator's own repeatability gate
+        rep((n_chk_eps == len(names_ok) or args.allow_dry_run)
+            and n_chk_bad == 0,
+            "generator's restore check",
+            f"{n_chk} cycles in {n_chk_eps} of {len(names_ok)} episodes, "
+            f"{n_chk_bad} over the limits, max any-body pos diff {chk_pos:.1e} m")
         if n_cyc:
             exp = n_cyc / k
             chi2 = float(((picks - exp) ** 2 / exp).sum())
@@ -204,6 +221,7 @@ def main():
                      success_rate=round(n_succ / max(len(have), 1), 4),
                      cycles=n_cyc, examples=2 * n_cyc,
                      cycles_per_episode=round(n_cyc / max(len(have), 1), 2),
+                     restore_checks=n_chk, restore_check_max_pos_m=chk_pos,
                      frame_kb_per_cycle=round(frame_bytes / max(n_cyc, 1) / 1024, 1))
         if n_cyc and not a.get("dry_run"):
             P, M = np.concatenate(P), np.concatenate(M)

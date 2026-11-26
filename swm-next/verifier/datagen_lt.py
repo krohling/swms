@@ -20,7 +20,11 @@ LangTable is single-phase (no grasp): there is no gate. The teacher's value
 is score = 0.8 * p_touch + 0.2 * p_closer.
 
 Rollouts use the Phase-1 validated restore (test_lt_set_state.py):
-deterministicOverlappingPairs=1 plus set_state THEN restore_state_native.
+deterministicOverlappingPairs=1 plus set_state THEN restore_state_native,
+after flush_contacts (the engine keeps the contact pairs of an earlier
+rollout across a restore; see the restore check below). The rewind before
+the executed actions is the same restore, so the first actions of the
+rollout and the executed ones start from one engine state.
 Rollout steps skip the camera render (lookahead <= chunk length, so no
 frame of the rollout is read by the policy); the judge gets its own
 judge-scale render of the end state, exactly as the teacher does.
@@ -81,7 +85,21 @@ from mpc import build_lt_questions, make_lt_env  # noqa: E402
 
 # 6000-6049 and 6100-6249 are the n=200 eval blocks, 6050-6099 is held out
 EVAL_SEEDS = range(6000, 6250)
-STATE_TOL = 1e-6           # restore check, as in test_lt_set_state.py
+# Restore check. set_state + restoreState bring back every readable quantity
+# (pose, velocity, joints of all bodies) bit for bit, but not the contact pairs
+# the previous rollout left in the engine, so a repeated rollout could end
+# millimeters away (smoke of Nov 26: 3 of 190 checks, up to 2.5e-3 m and 206
+# gray levels). restore() therefore flushes the pairs first. Measured on LARG
+# with the flush (300 repeats, 5 seeds, all 5 tasks): 299 bit-identical in
+# frame and engine state, one at 5e-7 m with 2 pixels off by 1 level. The
+# limits sit two orders of magnitude above that and an order under what the
+# unflushed restore showed. (set_state alone, without the snapshot, is not a
+# complete restore: rollouts from it end up to 1 cm apart.)
+POS_TOL = 1e-4             # m, every body, and the task blocks and the peg
+ORN_TOL = 1e-3             # quaternion components, every body
+JOINT_TOL = 1e-4           # rad, every joint
+PX_ANY_MAX = 500           # pixels of the end frame that differ at all
+PX_OVER2_MAX = 50          # pixels that differ by more than 2 levels
 
 
 def ladder(k):
@@ -102,6 +120,22 @@ def oracle_vec(env, block1, block2):
     peg = np.asarray(st["peg"], dtype=np.float64)
     return np.asarray([*b1, *b2, *peg, np.linalg.norm(b1 - b2),
                        np.linalg.norm(peg - b1)], dtype=np.float64)
+
+
+def engine_poses(client):
+    """Base position and quaternion of every body and every joint angle, read
+    from the engine (float64). The restore check compares all of them, not
+    only the task's two blocks and the peg."""
+    pos, orn, joints = [], [], []
+    for i in range(client.getNumBodies()):
+        b = client.getBodyUniqueId(i)
+        p, q = client.getBasePositionAndOrientation(b)
+        pos.append(p)
+        orn.append(q)
+        joints += [client.getJointState(b, j)[0]
+                   for j in range(client.getNumJoints(b))]
+    return (np.asarray(pos, np.float64), np.asarray(orn, np.float64),
+            np.asarray(joints, np.float64))
 
 
 def pack_state(state):
@@ -134,7 +168,8 @@ def run_episode(h5, env, goal, judge, cfg, seed, arm, k, temps, lookahead,
                score=[], pick=[], proposal_trajs=[], min_sep=[], oracle_t=[],
                oracle_end=[], end_done=[], state_t=[], end_state=[])
     secs = dict(policy=0.0, sim=0.0, judge=0.0, execute=0.0)
-    check = dict(cycles=0, bad=0, max_state=0.0, max_px=0)
+    check = dict(cycles=0, bad=0, max_state=0.0, max_pos=0.0, max_orn=0.0,
+                 max_joint=0.0, max_px=0, max_px_n=0, max_px_over2=0)
     done = False
     cycle = -1
     for cycle in range(cfg["max_cycles"]):
@@ -161,6 +196,7 @@ def run_episode(h5, env, goal, judge, cfg, seed, arm, k, temps, lookahead,
         sid = env.save_state_native()
 
         def restore():
+            env.flush_contacts()            # no pair of an earlier rollout
             env.set_state(S)                # python-side pose + ObjState
             env.restore_state_native(sid)   # engine snapshot
 
@@ -176,16 +212,31 @@ def run_episode(h5, env, goal, judge, cfg, seed, arm, k, temps, lookahead,
 
         end_frame, o_end, end_done, S_end = rollout()
         if cycle < check_cycles:
-            # the determinism gate on a real state of this episode
+            # the repeatability gate on a real state of this episode: the
+            # same rollout once more from the same restored state
+            e1 = engine_poses(client)
             f2, o2, _, _ = rollout()
-            px = np.abs(end_frame.astype(np.int16) - f2.astype(np.int16))
+            e2 = engine_poses(client)
+            px = np.abs(end_frame.astype(np.int16)
+                        - f2.astype(np.int16)).max(-1)        # per pixel
             ds = float(np.abs(o_end - o2).max())
-            ok = ds <= STATE_TOL and (
-                px.max() == 0 or (px.max() <= 2 and (px > 0).sum() <= 200))
+            d_task = float(np.abs(o_end[:6] - o2[:6]).max())  # positions
+            d_pos = float(np.abs(e1[0] - e2[0]).max())
+            # q and -q are one rotation
+            d_orn = float(np.minimum(np.abs(e1[1] - e2[1]).max(-1),
+                                     np.abs(e1[1] + e2[1]).max(-1)).max())
+            d_jnt = float(np.abs(e1[2] - e2[2]).max()) if e1[2].size else 0.0
+            n_any, n_over2 = int((px > 0).sum()), int((px > 2).sum())
+            ok = (d_task <= POS_TOL and d_pos <= POS_TOL and d_orn <= ORN_TOL
+                  and d_jnt <= JOINT_TOL and n_any <= PX_ANY_MAX
+                  and n_over2 <= PX_OVER2_MAX)
             check["cycles"] += 1
             check["bad"] += 0 if ok else 1
-            check["max_state"] = max(check["max_state"], ds)
-            check["max_px"] = max(check["max_px"], int(px.max()))
+            for name, v in (("max_state", ds), ("max_pos", d_pos),
+                            ("max_orn", d_orn), ("max_joint", d_jnt),
+                            ("max_px", int(px.max())), ("max_px_n", n_any),
+                            ("max_px_over2", n_over2)):
+                check[name] = max(check[name], v)
         restore()
         client.removeState(sid)
         secs["sim"] += time.perf_counter() - t0
@@ -282,8 +333,13 @@ def main():
     ap.add_argument("--restore-check-cycles", type=int, default=0,
                     dest="check_cycles",
                     help="repeat the rollout of the first N cycles of every "
-                         "episode and compare (the determinism gate on real "
-                         "states); a mismatch ends the run")
+                         "episode and compare (the repeatability gate on real "
+                         "states); a difference over the limits ends the run "
+                         "and the episode is not kept")
+    ap.add_argument("--restore-check-keep-going", action="store_true",
+                    dest="check_keep_going",
+                    help="measurement runs only (needs --no-judge): count "
+                         "the checks over the limits instead of ending the run")
     ap.add_argument("--code-state", default="", dest="code_state",
                     help="free text stored in the file attrs (commits)")
     ap.add_argument("--set", action="append", default=[], dest="overrides",
@@ -296,6 +352,8 @@ def main():
         key, val = kv.split("=", 1)
         cfg[key] = yaml.safe_load(val)
     assert cfg.get("env_type") == "lang_table", "LangTable configs only"
+    assert args.no_judge or not args.check_keep_going, \
+        "--restore-check-keep-going is for --no-judge measurement runs"
     seeds = range(args.seed_start, args.seed_start + args.episodes)
     assert not set(seeds) & set(EVAL_SEEDS), \
         "seed range overlaps 6000-6249 (reserved for evaluation)"
@@ -349,7 +407,7 @@ def main():
                 temp_schedule="ladder", pick_rule="uniform",
                 w_touch=0.8, w_closer=0.2,
                 label_columns=["touching", "closer", "touching"]))))
-        wins = n_new = 0
+        wins = n_new = n_checks = n_bad = 0
         for i, seed in enumerate(seeds):
             if f"ep_{seed}" in h5:
                 print(f"[{i+1}/{args.episodes}] ep_{seed} exists, skip",
@@ -371,10 +429,20 @@ def main():
             if check["cycles"]:
                 print(f"    restore check: {check['cycles']} cycles, "
                       f"{check['bad']} bad, max state diff "
-                      f"{check['max_state']:.1e}, max px diff "
-                      f"{check['max_px']}", flush=True)
-                if check["bad"]:
+                      f"{check['max_state']:.1e} (any body: pos "
+                      f"{check['max_pos']:.1e} m, orn {check['max_orn']:.1e}, "
+                      f"joint {check['max_joint']:.1e}), max px diff "
+                      f"{check['max_px']} ({check['max_px_n']} pixels differ, "
+                      f"{check['max_px_over2']} by more than 2)", flush=True)
+                n_checks += check["cycles"]
+                n_bad += check["bad"]
+                if check["bad"] and not args.check_keep_going:
+                    del h5[f"ep_{seed}"]    # a rerun makes this episode again
+                    h5.flush()
                     raise SystemExit("RESTORE_CHECK_FAILED")
+        if n_checks:
+            print(f"restore checks of this run: {n_checks} cycles, {n_bad} "
+                  f"over the limits", flush=True)
     print(f"DATAGEN_DONE -> {args.out}", flush=True)
 
 

@@ -29,6 +29,7 @@ LTPOL=$ROOT/swm-followup/swms/ckpts/lt_base_diffusion
 LTSIM=$ROOT/swm-followup/language-table
 PORT=8902
 MIN_FREE_GB=6                 # scratch quota guard: no new unit under this
+CHECK_CYCLES=${LTGEN_CHECK_CYCLES:-2}   # restore check: first N cycles of every episode
 TASKS=(green_cube_blue_moon red_moon_green_star red_pentagon_blue_moon
        yellow_pentagon_red_moon yellow_star_blue_cube)
 export CUDA_DEVICE_ORDER=PCI_BUS_ID HF_HUB_CACHE=$ROOT/hf_cache HF_HUB_OFFLINE=1 PYTHONUNBUFFERED=1
@@ -133,7 +134,7 @@ worker)
     CUDA_VISIBLE_DEVICES=$CVD nice -n 10 $PY swm-next/verifier/datagen_lt.py \
       --config swm-next/configs/verifier_mpc_lt_$T.yaml --set device=$POLDEV \
       --set judge_url=http://127.0.0.1:$PORT --set diffusion_path=$LTPOL/$T.pt \
-      --episodes $E --seed-start $S --restore-check-cycles 2 --code-state "$CODE" \
+      --episodes $E --seed-start $S --restore-check-cycles $CHECK_CYCLES --code-state "$CODE" \
       --out $P >> $OUT/logs/$NAME.log 2>&1 < /dev/null
     rc=$?
     if [ $rc = 0 ]; then

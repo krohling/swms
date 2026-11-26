@@ -47,13 +47,32 @@ class LangTableEnv(BaseEnv):
         return np.asarray(img, dtype=np.uint8)
 
     def save_state_native(self):
-        """Full-engine in-memory snapshot (pybullet saveState): solver/contact
-        caches included. Returns a snapshot id valid within this process."""
+        """Full-engine in-memory snapshot (pybullet saveState). Returns a
+        snapshot id valid within this process. restoreState does not clear the
+        contact pairs a later rollout left in the engine: call flush_contacts
+        before restoring when the rollout must be repeatable."""
         return self.env._pybullet_client.saveState()
 
     def restore_state_native(self, snapshot_id):
         """Restore a save_state_native snapshot (pybullet restoreState)."""
         self.env._pybullet_client.restoreState(snapshot_id)
+
+    def flush_contacts(self):
+        """Empty the engine's contact pairs: move every free body (no joints,
+        mass > 0) far from all others and run collision detection. Poses are
+        left wrong on purpose; call set_state + restore_state_native next.
+        Without this, pairs left by an earlier rollout survive the restore and
+        a rollout repeated from one snapshot can end differently (LARG, Nov
+        26: 9 of 27 end frames differ without, 1 of 300 by 1 level with)."""
+        c = self.env._pybullet_client
+        n = 0
+        for i in range(c.getNumBodies()):
+            b = c.getBodyUniqueId(i)
+            if c.getNumJoints(b) == 0 and c.getDynamicsInfo(b, -1)[0] > 0:
+                c.resetBasePositionAndOrientation(
+                    b, [50.0 + 3.0 * n, 50.0, 5.0], [0, 0, 0, 1])
+                n += 1
+        c.performCollisionDetection()
 
     def project_actions_to_camera_frame(self, actions: np.ndarray) -> np.ndarray:
         actions = np.cumsum(actions, axis=0)
