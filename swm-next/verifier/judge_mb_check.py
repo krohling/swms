@@ -10,8 +10,21 @@ server that NOTHING ELSE is using:
   pass C  one request at a time again     -> the run-to-run noise at 1 item
 
 Prints the A-vs-B and A-vs-C differences per question kind and the server's
-mean batch in pass B (from GET /stats). Exit code 1 if a label flips across
-0.5 between A and B, or the largest A-vs-B difference exceeds --tol.
+mean batch in pass B (from GET /stats).
+
+What to expect (measured Nov 26 on an A40, 370 items of three smoke units):
+the judge runs in bfloat16, so its yes/no logits come in steps of 1/16 to
+1/8, and a forward of 8 items rounds some of them one step differently than
+a forward of 1. Alone vs in a batch: logit difference mean abs 0.10-0.14,
+max 0.5-0.6, signed mean within +-0.035 (no bias). In p that is 0.004-0.012
+on average, up to 0.12 for an item near 0.5, and 1-3 items of 185 that sit
+next to 0.5 change sides. The size of the forward matters, the companions
+do not (batch of 8 vs another batch of 8: mean abs 0.02). An item alone
+gives the same p every time.
+
+So the rule is on the logit differences between A and B: exit code 1 if the
+signed mean exceeds --bias-tol (a batch-size bias in the labels), the mean
+abs exceeds --mean-tol, or the largest exceeds --max-tol (more than rounding).
 
   python swm-next/verifier/judge_mb_check.py --url http://127.0.0.1:8902 \
       --h5 <unit>.h5 --cycles 48
@@ -40,13 +53,20 @@ def stats(url):
         url.rstrip("/") + "/stats", timeout=30).read())
 
 
+def logit(p):
+    p = np.clip(p, 1e-6, 1 - 1e-6)
+    return np.log(p / (1 - p))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--url", required=True)
     ap.add_argument("--h5", required=True)
     ap.add_argument("--cycles", type=int, default=48)
     ap.add_argument("--threads", type=int, default=24)
-    ap.add_argument("--tol", type=float, default=0.02)
+    ap.add_argument("--bias-tol", type=float, default=0.06, dest="bias_tol")
+    ap.add_argument("--mean-tol", type=float, default=0.25, dest="mean_tol")
+    ap.add_argument("--max-tol", type=float, default=1.0, dest="max_tol")
     args = ap.parse_args()
 
     items = []                                   # (kind, image(s), question)
@@ -93,13 +113,19 @@ def main():
         ix = np.asarray([i for i, it in enumerate(items) if it[0] == kind])
         a, b, c = A[ix, 0], B[ix, 0], C_[ix, 0]
         dab, dac = np.abs(a - b), np.abs(a - c)
-        flips = int(((a > 0.5) != (b > 0.5)).sum())
+        flip = (a > 0.5) != (b > 0.5)
+        dl = logit(b) - logit(a)
         print(f"{kind}: n {len(ix)}, p mean {a.mean():.3f}, share > 0.5 "
-              f"{(a > 0.5).mean():.2f} | batched vs alone: max {dab.max():.4f}"
-              f", mean {dab.mean():.5f}, flips across 0.5: {flips} | alone vs "
-              f"alone again: max {dac.max():.4f}, mean {dac.mean():.5f} | "
-              f"mass min {A[ix, 1].min():.3f}", flush=True)
-        bad |= flips > 0 or dab.max() > args.tol
+              f"{(a > 0.5).mean():.2f} | batched vs alone: p max {dab.max():.4f}"
+              f", mean {dab.mean():.5f}; logit signed mean {dl.mean():+.4f}, "
+              f"mean abs {np.abs(dl).mean():.4f}, max {np.abs(dl).max():.3f}; "
+              f"flips across 0.5: {int(flip.sum())}"
+              f"{' at p alone ' + ', '.join(f'{v:.3f}' for v in a[flip]) if flip.any() else ''}"
+              f" | alone vs alone again: max {dac.max():.4f}, mean "
+              f"{dac.mean():.5f} | mass min {A[ix, 1].min():.3f}", flush=True)
+        bad |= (abs(dl.mean()) > args.bias_tol
+                or np.abs(dl).mean() > args.mean_tol
+                or np.abs(dl).max() > args.max_tol)
     print("MB_CHECK_FAIL" if bad else "MB_CHECK_PASS", flush=True)
     return 1 if bad else 0
 
