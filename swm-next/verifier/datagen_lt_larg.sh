@@ -164,7 +164,10 @@ status)
 stopworkers)
   touch $OUT/STOP
   for p in $OUT/pids/worker*.pid; do alive $p && { pkill -P "$(cat $p)"; kill "$(cat $p)"; }; done
-  rm -f $OUT/STOP; echo "workers stopped";;
+  sleep 2
+  # no worker is left, so every claim is stale: `add` can pick the units up again
+  [ "$(n_alive)" = 0 ] && rm -rf $OUT/claims
+  rm -f $OUT/STOP; echo "workers stopped ($(n_alive) alive)";;
 stop)
   for p in $OUT/pids/worker*.pid; do alive $p && { pkill -P "$(cat $p)"; kill "$(cat $p)"; }; done
   alive $OUT/pids/judge.pid && kill "$(cat $OUT/pids/judge.pid)"; echo stopped;;
