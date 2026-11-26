@@ -1,0 +1,86 @@
+# Experiment 5a: exp4a's exact recipe on "the paper's data" — v5 OGBench-
+# ORACLE PLAY episodes (Jacob's collect_demos.py, run unchanged on seeds
+# 70000+; Jacob confirmed by email 2026-08-04 that the paper regenerated its
+# OGBench data this way and never used the public npz), labeled by OUR Qwen
+# teacher with v3a's three planner probes. See
+# swm-next/configs/datagen_v5_ogbplay.yaml for the dataset recipe.
+#
+# Hypothesis (Kevin, 2026-11-06): the paper's oracle play data trains a
+# better SWM than our diffusion-policy rollouts (v3a). Vs exp4a ONLY the data
+# SOURCE varies. Label balance (FULL set, 4,200 eps / 193,200 cycles,
+# 2026-11-07): the judge's positives (p>0.5) are 16.3% place / 18.2% approach
+# — sparser than the 20-episode smoke suggested (21% / 23%) and below v3a's
+# 26% / 20% on place — while simulator truth is sparser still (3.3%
+# blue-on-green, 10.7% grasped at window end); the judge answers "grasping" /
+# "on top" more permissively than the simulator (AUC vs truth 0.86 / 0.96).
+# balance_labels is ON (Kevin, 2026-11-08): the unbalanced warm-up (wu5,
+# Vista 1129710) plateaued at plain val BCE 0.393 against a prior-only 0.448,
+# with val_bce_balanced 0.62-0.65 vs chance 0.693 — the projector had mostly
+# learned the base rate — so exp5 adopts the paper's per-type true/false
+# balancing in BOTH stages (balanced warm-up wu5b -> balanced main stage).
+# Vs exp4a this therefore varies the data source AND the sampling; the
+# unbalanced wu5 pick (exp5a_warmup_v5/ckpt_step5000 @ 0.3927) stays on disk
+# as the one-variable fallback.
+# Trainer index: 3,990 / 210 episodes -> 367,080 train / 19,320 val lists
+# (exp4a: 366,034 / 19,242). Oracle actions reach the clip on dim 0 where the
+# diffusion ckpt's amin is -0.962, so normalized trajs dip to -1.04 (benign).
+# Pre-registered caveats: oracle per-step actions are ~1.5-2x larger on xyz
+# than diffusion proposals and the gripper command is graded (|g|<0.5 on 89%
+# of steps) vs the policy's +-1 — a covariate shift at deployment that the
+# paper's SWM tolerated (scored diffusion proposals at 76 suite).
+# Budget: 367,080 lists / 12 per step x 3 epochs = 91,770 steps (exp4a:
+# 91,506) — matched to exp4a.
+# Pre-registered success gate (same as team-exp4): peak block-A suite within
+# ~1 s.e. (~4) of exp1's 54.7 AND >=3 over control 46.7; winner gets a
+# block-B leg. Warm-up pick judged on val_bce_balanced (the balanced
+# objective); plain val BCE is logged alongside.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths: [datasets_swm/bg_v5_ogbplay_s70000.h5]
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+val_frac: 0.05
+epochs: 3
+micro_cycles: 2
+accum_cycles: 6                # eff 12 cycles/step, exp1 geometry
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+balance_labels: true           # ON (Kevin 2026-11-08): balanced warm-up -> balanced main stage
+balance_threshold: 0.5
+init_projector: outputs_swm_lora/exp5a_warmup_v5_balanced/ckpt_step4000
+# ^ PICK-LOCKED 2026-11-09 from the BALANCED warm-up wu5b (Vista 1132250,
+# gh-dev, ran 17:46-19:46 CT to step 5520 at the 2h wall): argmin of
+# val_bce_balanced over saved ckpts = ckpt_step4000 @ 0.5502 (plain val BCE
+# 0.437; runners-up 4500: 0.5520, 1500/5000: 0.5579; last saved 5500:
+# 0.5669). Curve: balanced BCE 0.622 @100 -> ~0.57 by 300 -> drifting down
+# to ~0.55 from 3800 on; 7-pt smoothed tail flat at 0.553-0.557 over steps
+# 4400-5500 (min 0.5535 @5400, 0.5555 @5500) -> extend-one-leg rule NOT
+# triggered. vs the unbalanced wu5 the balanced floor moved 0.62 -> 0.55
+# (chance 0.693), pos/neg BCE ~0.72/0.38 at the pick. The sbatch refuses to
+# start while this line is commented out (INIT_PICK_NOT_LOCKED).
+# History: the UNBALANCED wu5 (Vista 1129710, ran 05:03-07:03 CT 2026-11-08 to
+# step 5660 at the 2h wall) was pick-locked here briefly as
+# exp5a_warmup_v5/ckpt_step5000 @ plain val BCE 0.3927 (plateau 0.39-0.40 from
+# step 100, transient bump 2700-4200, flat tail -> no extension); Kevin retired
+# that pick the same morning in favour of the balanced recipe because the
+# plateau sat just below the prior-only 0.448 (val_bce_balanced 0.62-0.65 vs
+# chance 0.693; pos/neg BCE 0.95/0.29) — the projector had mostly learned the
+# base rate.
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 500
+val_max_lists: 600             # ~25-50 positives per pass (v3a used 200)
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp5a-ogbplay
+out_dir: outputs_swm_lora/exp5a_full

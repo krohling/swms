@@ -1,0 +1,35 @@
+# Smoke test for train_exp6a.yaml (gh-dev, 60 steps, original v3b file only):
+# exercises fixed_val_split, total_steps and the 16-sequence forward batch at
+# k=1 before the 48 h legs start. Everything below the header comments is
+# train_exp6a.yaml with only the step/val/ckpt cadence, file list and names changed.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths:
+  - datasets_swm/bg_v3b_k8uni_s60000.h5
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+fixed_val_split: swm-next/swm_lora/splits/exp4b_split.json
+total_steps: 60
+micro_cycles: 16
+accum_cycles: 6                # eff 96 examples/step (exp1b: 12 lists x 8)
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/exp4b_warmup_v3b/ckpt_step5250
+learning_rate: 1.0e-4          # exp1b's value at this batch size
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 60
+val_max_lists: 64
+ckpt_every: 60
+resume_every: 20
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp6a-smoke
+out_dir: outputs_swm_lora/exp6a_smoke

@@ -28,13 +28,13 @@ import os
 import numpy as np
 import torch
 import yaml
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                    # noqa: E402
-from data import (CycleDataset, action_stats, collate_cycles,  # noqa: E402
-                  episode_split, save_split)
+from data import (CycleDataset, action_stats, balanced_weights,  # noqa: E402
+                  collate_cycles, episode_split, save_split)
 from train4 import within_cycle_rho                          # noqa: E402
 
 
@@ -124,6 +124,17 @@ def main():
         val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
         collate_fn = collate_cycles
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}", flush=True)
+    # exp5: per-question 50/50 class balancing (Jacob's dataset recipe) for
+    # sparse-positive data; pointwise objective only. Draws with replacement,
+    # len(train_ds) per epoch, so step counts are unchanged.
+    sample_w = None
+    if cfg.get("balance_labels", False):
+        assert objective == "pointwise", "balance_labels is pointwise-only"
+        sample_w, cells = balanced_weights(
+            train_ds, threshold=float(cfg.get("balance_threshold", 0.5)))
+        print("label-balanced sampling ON: " + ", ".join(
+            f"{q[:30]!r}/{'pos' if c else 'neg'}={n:,}"
+            for (q, c), n in sorted(cells.items())), flush=True)
 
     common = dict(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
                   horizon=cfg["horizon"], device=device,
@@ -171,6 +182,7 @@ def main():
         dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_fn,
                         num_workers=2)
         bces, rhos_f, top1, regret = [], [], [], []
+        pbs, tts = [], []                          # per-item BCE (class split)
         with torch.no_grad():
             seen = 0
             for b in dl:
@@ -193,6 +205,9 @@ def main():
                     l = model.answer_logit(b["images"], b["questions"], b["trajs"])
                     tt = b["targets"].to(l.device)
                     bces.append(float(model.loss(l, tt)))
+                    pbs += torch.nn.functional.binary_cross_entropy_with_logits(
+                        l, tt, reduction="none").cpu().numpy().tolist()
+                    tts += b["targets"].numpy().tolist()
                     p = torch.sigmoid(l).cpu().numpy()
                     tt_np = b["targets"].numpy().reshape(b["m"], b["k"])
                     for mi in range(b["m"]):
@@ -208,12 +223,25 @@ def main():
         if objective == "selection":
             m.update(top1_acc=float(np.mean(top1)) if top1 else 0.0,
                      regret=float(np.mean(regret)) if regret else 0.0)
+        if pbs:                                    # class-split BCE (sparse-
+            pb, pos = np.array(pbs), np.array(tts) > 0.5   # positive data)
+            m.update(bce_pos=float(pb[pos].mean()) if pos.any() else 0.0,
+                     bce_neg=float(pb[~pos].mean()) if (~pos).any() else 0.0,
+                     pos_frac=float(pos.mean()))
+            m["bce_balanced"] = 0.5 * (m["bce_pos"] + m["bce_neg"])
         return m
 
     model.model.train()
     g = torch.Generator().manual_seed(cfg.get("seed", 0))
-    dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
-                    collate_fn=collate_fn, num_workers=4, drop_last=True)
+    if sample_w is not None:
+        sampler = WeightedRandomSampler(torch.as_tensor(sample_w),
+                                        num_samples=len(train_ds),
+                                        replacement=True, generator=g)
+        dl = DataLoader(train_ds, batch_size=mc, sampler=sampler,
+                        collate_fn=collate_fn, num_workers=4, drop_last=True)
+    else:
+        dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
+                        collate_fn=collate_fn, num_workers=4, drop_last=True)
     it = iter(dl)
     step = 0
     while step < max_steps:
@@ -248,7 +276,7 @@ def main():
                          proj_scale=float(model.projector.scale.detach())),
                     step=step)
         if step % val_every == 0:
-            m = val_pass()
+            m = val_pass(max_lists=int(cfg.get("val_max_lists", 200)))
             run.log({f"val_{k}": v for k, v in m.items()}, step=step)
             print(f"step {step}: val {m}", flush=True)
         if step % ckpt_every == 0:

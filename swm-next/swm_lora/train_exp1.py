@@ -20,8 +20,9 @@ Data: questions are enumerated from the dataset files themselves; cfg
 Validation: loss/MAE, within-cycle Spearman rho (rank correlation across each
 held-out cycle's siblings), and a base-drift probe (empty-trajectory p_yes vs
 step-0 outputs). Checkpoints: eval/export adapters every ckpt_every steps
-(wandb artifacts) + atomic full resume states (optimizer/scheduler/RNG,
-keep-2); --resume auto restarts from the newest valid state.
+(wandb artifacts, except with WANDB_MODE=offline) + atomic full resume states
+(optimizer/scheduler/RNG, keep-2); --resume auto restarts from the newest
+valid state.
 
 Usage:
   python swm-next/swm_lora/train_exp1.py --config swm-next/swm_lora/train_exp1.yaml
@@ -33,13 +34,14 @@ import os
 import numpy as np
 import torch
 import yaml
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                   # noqa: E402
-from data import (CycleDataset, action_stats, collate_cycles,  # noqa: E402
-                  episode_split, save_split)
+from data import (CycleDataset, action_stats, balanced_weights,  # noqa: E402
+                  collate_cycles, episode_split, episode_split_fixed_val,
+                  save_split)
 
 
 def within_cycle_rho(p, t, k, m):
@@ -67,21 +69,35 @@ def main():
     np.random.seed(cfg.get("seed", 0))
 
     amin, amax = action_stats(cfg["diffusion_ckpt"])
-    train_eps, val_eps = episode_split(cfg["h5_paths"],
-                                       val_frac=cfg.get("val_frac", 0.1),
-                                       seed=cfg.get("seed", 0))
+    if cfg.get("fixed_val_split"):                # exp6: keep an earlier run's
+        train_eps, val_eps = episode_split_fixed_val(   # held-out episodes
+            cfg["h5_paths"], cfg["fixed_val_split"])
+    else:
+        train_eps, val_eps = episode_split(cfg["h5_paths"],
+                                           val_frac=cfg.get("val_frac", 0.1),
+                                           seed=cfg.get("seed", 0))
     save_split(f"{out}/split.json", train_eps, val_eps, cfg["h5_paths"])
     qsel = cfg.get("questions", "planner")
     train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax, questions=qsel)
     val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}",
           flush=True)
+    # exp5: per-question 50/50 class balancing (Jacob's dataset recipe) for
+    # sparse-positive data. Epoch length stays len(train_ds) draws (with
+    # replacement), so total_steps / compute match the unbalanced recipe.
+    sample_w = None
+    if cfg.get("balance_labels", False):
+        sample_w, cells = balanced_weights(
+            train_ds, threshold=float(cfg.get("balance_threshold", 0.5)))
+        print("label-balanced sampling ON: " + ", ".join(
+            f"{q[:30]!r}/{'pos' if c else 'neg'}={n:,}"
+            for (q, c), n in sorted(cells.items())), flush=True)
 
     mc = int(cfg["micro_cycles"])                 # cycles per micro-step
     accum = int(cfg["accum_cycles"])              # micro-steps per opt step
     epochs = float(cfg.get("epochs", 4))
     steps_per_epoch = len(train_ds) // (mc * accum)
-    total_steps = int(epochs * steps_per_epoch)
+    total_steps = int(cfg.get("total_steps") or epochs * steps_per_epoch)
     warmup = int(cfg.get("warmup_frac", 0.03) * total_steps)
 
     model = QwenSWM(model_id=cfg["model_id"], action_dim=cfg["action_dim"],
@@ -141,7 +157,7 @@ def main():
         dl = DataLoader(val_ds, batch_size=mc, collate_fn=collate_cycles,
                         num_workers=2)
         bces, rhos, rhos_f, ps, ts = [], [], [], [], []
-        drift = []
+        pbs, drift = [], []                        # per-item BCE (class split)
         with torch.no_grad():
             seen = 0
             for b in dl:
@@ -150,6 +166,8 @@ def main():
                 l = model.answer_logit(b["images"], b["questions"], b["trajs"])
                 tt = b["targets"].to(l.device)
                 bces.append(float(model.loss(l, tt)))
+                pbs += torch.nn.functional.binary_cross_entropy_with_logits(
+                    l, tt, reduction="none").cpu().numpy().tolist()
                 p = torch.sigmoid(l).cpu().numpy()
                 rhos += within_cycle_rho(p, b["targets"].numpy(), b["k"], b["m"])
                 # spread-filtered variant: only lists the teacher can rank
@@ -173,7 +191,13 @@ def main():
             bd = float(np.abs(base[:n] - np.array(drift[:n])).mean())
         ps, ts = np.array(ps), np.array(ts)
         model.model.train()
-        return dict(bce=float(np.mean(bces)),
+        pb, pos = np.array(pbs), ts > 0.5          # class-split BCE: on sparse-
+        bce_pos = float(pb[pos].mean()) if pos.any() else 0.0   # positive data
+        bce_neg = float(pb[~pos].mean()) if (~pos).any() else 0.0  # plain BCE
+        return dict(bce=float(np.mean(bces)),                   # tracks the
+                    bce_pos=bce_pos, bce_neg=bce_neg,           # base rate
+                    bce_balanced=0.5 * (bce_pos + bce_neg),
+                    pos_frac=float(pos.mean()),
                     within_cycle_rho=float(np.mean(rhos)) if rhos else 0.0,
                     within_cycle_rho_informative=(float(np.mean(rhos_f))
                                                   if rhos_f else 0.0),
@@ -188,8 +212,15 @@ def main():
     model.model.train()
     step = step0
     g = torch.Generator().manual_seed(cfg.get("seed", 0) + step0)
-    dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
-                    collate_fn=collate_cycles, num_workers=4, drop_last=True)
+    if sample_w is not None:
+        sampler = WeightedRandomSampler(torch.as_tensor(sample_w),
+                                        num_samples=len(train_ds),
+                                        replacement=True, generator=g)
+        dl = DataLoader(train_ds, batch_size=mc, sampler=sampler,
+                        collate_fn=collate_cycles, num_workers=4, drop_last=True)
+    else:
+        dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
+                        collate_fn=collate_cycles, num_workers=4, drop_last=True)
     it = iter(dl)
     while step < total_steps:
         opt.zero_grad(set_to_none=True)
@@ -218,11 +249,14 @@ def main():
         if step % ckpt_every == 0 or step == total_steps:
             cdir = f"{out}/ckpt_step{step}"
             model.save_adapters(cdir)
-            import wandb as _w
-            art = _w.Artifact("swm-lora-exp1-ckpt", type="model",
-                              metadata=dict(step=step))
-            art.add_dir(cdir)
-            run.log_artifact(art, aliases=[f"step{step}"])
+            # an offline run keeps its checkpoints on disk only: an artifact
+            # stages a second copy of each one until the run is synced
+            if os.environ.get("WANDB_MODE") != "offline":
+                import wandb as _w
+                art = _w.Artifact("swm-lora-exp1-ckpt", type="model",
+                                  metadata=dict(step=step))
+                art.add_dir(cdir)
+                run.log_artifact(art, aliases=[f"step{step}"])
         if step % resume_every == 0 or step == total_steps:
             cdir = f"{out}/ckpt_step{step}"
             if not os.path.exists(cdir):

@@ -1,0 +1,54 @@
+# Experiment 6a (Kevin 2026-11-14): exp4b's recipe on the FULL 4x v3b set, moved
+# into the k=8 pointwise run's sample regime (exp1b, the 54.7 run): 96 labeled
+# examples per optimizer step for exp1b's step count. exp4b saw 12 examples per
+# step and 1.12M draws; exp1b saw 96 per step and 7.7M.
+#
+# Changes vs train_exp4b.yaml, nothing else:
+#   h5_paths        original v3b file + the six expansion files (seeds
+#                   100000-116199, datagen_v3b_x4_m5.sh; same recipe, verified)
+#   micro_cycles    2 -> 16: at k=1 a cycle is ONE sequence, so this is exp1b's
+#                   forward batch (2 lists x 8 siblings = 16 sequences, 43 GB)
+#   total_steps     80367 = exp1b's (about 5.2 passes over ~1.49M train examples)
+#   fixed_val_split exp4b's 270 val episodes stay held out and are the whole val
+#                   set, so eval_val_full.py scores the same items as exp4b;
+#                   all other episodes train
+#   val             2,000 items every 1,000 steps (exp4b's 200 items = 4 episodes)
+# The trajectory projector warm-starts from exp4b's own-data warm-up pick (same
+# generator, same recipe), so no new warm-up job.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 5
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths:
+  - datasets_swm/bg_v3b_k8uni_s60000.h5
+  - datasets_swm/bg_v3b_k8uni_s100000.h5
+  - datasets_swm/bg_v3b_k8uni_s102700.h5
+  - datasets_swm/bg_v3b_k8uni_s105400.h5
+  - datasets_swm/bg_v3b_k8uni_s108100.h5
+  - datasets_swm/bg_v3b_k8uni_s110800.h5
+  - datasets_swm/bg_v3b_k8uni_s113500.h5
+diffusion_ckpt: ckpts/ogbench_base_diffusion/blue_cube_green_cube.pt
+questions: planner
+fixed_val_split: swm-next/swm_lora/splits/exp4b_split.json
+total_steps: 80367
+micro_cycles: 16
+accum_cycles: 6                # eff 96 examples/step (exp1b: 12 lists x 8)
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/exp4b_warmup_v3b/ckpt_step5250
+learning_rate: 1.0e-4          # exp1b's value at this batch size
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 1000
+val_max_lists: 2000
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: exp6a-v3b4x-b96
+out_dir: outputs_swm_lora/exp6a_full
