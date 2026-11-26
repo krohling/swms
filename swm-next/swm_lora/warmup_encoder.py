@@ -33,8 +33,9 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                    # noqa: E402
-from data import (CycleDataset, action_stats, balanced_weights,  # noqa: E402
-                  collate_cycles, episode_split, save_split)
+from data import (CycleDataset, action_range, balanced_weights,  # noqa: E402
+                  collate_cycles, episode_split, episode_split_fixed_val,
+                  expand_h5_paths, save_split)
 from train4 import within_cycle_rho                          # noqa: E402
 
 
@@ -97,16 +98,21 @@ def main():
     ap.add_argument("--config", required=True)
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    cfg["h5_paths"] = expand_h5_paths(cfg["h5_paths"])
     out = cfg["out_dir"]
     os.makedirs(out, exist_ok=True)
     device = cfg.get("device", "cuda")
     torch.manual_seed(cfg.get("seed", 0))
     np.random.seed(cfg.get("seed", 0))
 
-    amin, amax = action_stats(cfg["diffusion_ckpt"])
-    train_eps, val_eps = episode_split(cfg["h5_paths"],
-                                       val_frac=cfg.get("val_frac", 0.05),
-                                       seed=cfg.get("seed", 0))
+    amin, amax = action_range(cfg)
+    if cfg.get("fixed_val_split"):                # the val episodes the full
+        train_eps, val_eps = episode_split_fixed_val(   # training run holds out
+            cfg["h5_paths"], cfg["fixed_val_split"])
+    else:
+        train_eps, val_eps = episode_split(cfg["h5_paths"],
+                                           val_frac=cfg.get("val_frac", 0.05),
+                                           seed=cfg.get("seed", 0))
     save_split(f"{out}/split.json", train_eps, val_eps, cfg["h5_paths"])
     objective = cfg.get("objective", "pointwise")
     assert objective in ("pointwise", "selection"), objective
@@ -120,8 +126,11 @@ def main():
             "weighting applies to the pointwise objective only"
     else:
         qsel = cfg.get("questions", "planner")
-        train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax, questions=qsel)
-        val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
+        isz = cfg.get("image_size")               # (width, height) or None
+        train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax,
+                                questions=qsel, image_size=isz)
+        val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax,
+                              questions=qsel, image_size=isz)
         collate_fn = collate_cycles
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}", flush=True)
     # exp5: per-question 50/50 class balancing (Jacob's dataset recipe) for

@@ -6,6 +6,7 @@ Split is by WHOLE EPISODES (no frame leakage across train/val), stratified by
 selection policy. Trajectories are normalized with the diffusion checkpoint's
 own stats so normalization is frozen with the data, not the code.
 """
+import glob
 import io
 import json
 import os
@@ -25,6 +26,45 @@ def action_stats(diffusion_ckpt_path):
     ck = torch.load(diffusion_ckpt_path, map_location="cpu", weights_only=False)
     stats = ck["stats"]["action"]
     return np.asarray(stats["min"], np.float32), np.asarray(stats["max"], np.float32)
+
+
+def action_range(cfg):
+    """(amin, amax) of a run. cfg "action_range" {min, max} when given: one
+    model over several per-task policies (LangTable) normalizes with the union
+    of their ranges, written out in the training config so the closed-loop
+    eval reads the same numbers. Otherwise the stats of cfg "diffusion_ckpt"."""
+    if cfg.get("action_range"):
+        r = cfg["action_range"]
+        amin, amax = np.asarray(r["min"], np.float32), np.asarray(r["max"], np.float32)
+        assert amin.shape == amax.shape == (int(cfg["action_dim"]),), (amin, amax)
+        assert (amax > amin).all(), (amin, amax)
+        return amin, amax
+    return action_stats(cfg["diffusion_ckpt"])
+
+
+def expand_h5_paths(paths):
+    """cfg "h5_paths" with glob patterns expanded in sorted order (a dataset
+    kept as many unit files). A pattern that matches no file is an error."""
+    out = []
+    for p in paths:
+        if any(ch in str(p) for ch in "*?["):
+            hits = sorted(glob.glob(str(p)))
+            assert hits, f"h5_paths pattern matches no file: {p}"
+            out += hits
+        else:
+            out.append(str(p))
+    assert len(set(out)) == len(out), "h5_paths lists a file twice"
+    return out
+
+
+def decode_frame(buf, image_size=None):
+    """Stored JPEG bytes -> RGB image, resized to image_size (width, height)
+    when given. The closed-loop eval puts its own frame through the same JPEG
+    round trip and this function, so training and eval share one pixel path."""
+    img = Image.open(io.BytesIO(buf)).convert("RGB")
+    if image_size is not None and img.size != tuple(image_size):
+        img = img.resize(tuple(image_size), Image.BICUBIC)
+    return img
 
 
 def normalize(traj, amin, amax):
@@ -128,13 +168,16 @@ class CycleDataset(Dataset):
     siblings together; frame-conditional shortcuts contribute exactly zero
     to that term because everything but the trajectories is shared."""
 
-    def __init__(self, h5_paths, episodes, amin, amax, questions="planner"):
+    def __init__(self, h5_paths, episodes, amin, amax, questions="planner",
+                 image_size=None):
         """questions: "planner" (approach+place from labels), "all" (also every
         aux question stored in the file), or an explicit list of question
         strings to include. Question texts come from file attrs — the trainer
-        stays agnostic to what the dataset contains."""
+        stays agnostic to what the dataset contains. image_size (width,
+        height): frames are resized to it (decode_frame); None = as stored."""
         self.paths = list(h5_paths)
         self.amin, self.amax = amin, amax
+        self.image_size = tuple(image_size) if image_size else None
         self._files = None
         self.index = []          # (path_idx, ep, cycle, source, col, q)
         for pi, ep in episodes:
@@ -165,7 +208,7 @@ class CycleDataset(Dataset):
     def __getitem__(self, i):
         pi, ep, c, src, col, q = self.index[i]
         g = self._f(pi)[ep]
-        img = Image.open(io.BytesIO(g["frames_t"][c].tobytes())).convert("RGB")
+        img = decode_frame(g["frames_t"][c].tobytes(), self.image_size)
         trajs = normalize(g["trajs"][c].astype(np.float32), self.amin, self.amax)
         targets = g[src][c, :, col].astype(np.float32)
         return dict(image=img, question=str(q),

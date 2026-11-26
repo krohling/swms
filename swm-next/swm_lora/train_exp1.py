@@ -39,9 +39,9 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import QwenSWM                                   # noqa: E402
-from data import (CycleDataset, action_stats, balanced_weights,  # noqa: E402
+from data import (CycleDataset, action_range, balanced_weights,  # noqa: E402
                   collate_cycles, episode_split, episode_split_fixed_val,
-                  save_split)
+                  expand_h5_paths, save_split)
 
 
 def within_cycle_rho(p, t, k, m):
@@ -62,13 +62,14 @@ def main():
     ap.add_argument("--resume", default="auto", choices=["auto", "none"])
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    cfg["h5_paths"] = expand_h5_paths(cfg["h5_paths"])
     out = cfg["out_dir"]
     os.makedirs(out, exist_ok=True)
     device = cfg.get("device", "cuda")
     torch.manual_seed(cfg.get("seed", 0))
     np.random.seed(cfg.get("seed", 0))
 
-    amin, amax = action_stats(cfg["diffusion_ckpt"])
+    amin, amax = action_range(cfg)
     if cfg.get("fixed_val_split"):                # exp6: keep an earlier run's
         train_eps, val_eps = episode_split_fixed_val(   # held-out episodes
             cfg["h5_paths"], cfg["fixed_val_split"])
@@ -78,8 +79,11 @@ def main():
                                            seed=cfg.get("seed", 0))
     save_split(f"{out}/split.json", train_eps, val_eps, cfg["h5_paths"])
     qsel = cfg.get("questions", "planner")
-    train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax, questions=qsel)
-    val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax, questions=qsel)
+    isz = cfg.get("image_size")                   # (width, height) or None
+    train_ds = CycleDataset(cfg["h5_paths"], train_eps, amin, amax,
+                            questions=qsel, image_size=isz)
+    val_ds = CycleDataset(cfg["h5_paths"], val_eps, amin, amax,
+                          questions=qsel, image_size=isz)
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}",
           flush=True)
     # exp5: per-question 50/50 class balancing (Jacob's dataset recipe) for

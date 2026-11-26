@@ -1,0 +1,38 @@
+# 60-step sizing smoke for the LangTable run lt1 (vista-sbatch/smoke_lt1.sbatch):
+# exp6a's geometry (16 sequences per forward x 6 = 96 examples/step) on
+# LangTable batch 0 units with frames resized to 448x256. The sbatch derives
+# the 640x360 variants from this file with sed, so the recipe lives in one
+# place. No projector warm start and the default episode split: this run
+# measures pace and peak GPU memory, nothing else.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 2                  # LangTable: planar end-effector deltas
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths:
+  - "datasets_swm/lt_v1/units/b0_*_c[0-9].h5"
+action_range:                  # union of the five base policies' action stats
+  min: [-0.03322795033454895, -0.03476471081376076]
+  max: [0.03466081991791725, 0.03485218435525894]
+image_size: [448, 256]
+questions: planner
+total_steps: 60
+micro_cycles: 16
+accum_cycles: 6                # eff 96 examples/step
+learnable_scale: false
+proj_hidden: 512
+traj_cumsum: true
+learning_rate: 1.0e-4
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 60
+val_max_lists: 64
+ckpt_every: 60
+resume_every: 20
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: lt1-smoke-448
+out_dir: outputs_swm_lora/lt1_smoke_448
