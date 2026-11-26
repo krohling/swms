@@ -12,7 +12,7 @@ lora_alpha: 32
 lora_dropout: 0.05
 lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
 h5_paths:
-  - "datasets_swm/lt_v1/units/b0_*_c[0-9].h5"
+  - "datasets_swm/lt_v1/lt_v1_b0/units/b0_*_c[0-9].h5"
 action_range:                  # union of the five base policies' action stats
   min: [-0.03322795033454895, -0.03476471081376076]
   max: [0.03466081991791725, 0.03485218435525894]

@@ -10,7 +10,7 @@ file. data.episode_split stratifies by the policy flag only, which is
 
 Usage (batch 0 = 50 units, 540 episodes per task; 54 per task held out):
   python swm-next/swm_lora/make_lt_split.py \
-      --units 'datasets_swm/lt_v1/units/b0_*_c[0-9].h5' \
+      --units 'datasets_swm/lt_v1/lt_v1_b0/units/b0_*_c[0-9].h5' \
       --val-per-task 54 --out swm-next/swm_lora/splits/lt_v1_b0_split.json
 """
 import argparse

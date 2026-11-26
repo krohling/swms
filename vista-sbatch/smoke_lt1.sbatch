@@ -13,7 +13,8 @@
 #   640m8  only if 640 fails: 8 sequences per forward x 12 (same 96 per step)
 # The 640 configs are made from the 448 one with sed. Each run gets the job id
 # in its run name and output dir, so a second smoke never reads the first's files.
-# Needs at least 5 batch 0 units in datasets_swm/lt_v1/units. wandb stays
+# Needs at least 5 batch 0 units in datasets_swm/lt_v1/lt_v1_b0/units (the
+# layout of the m5 copy the relay from LARG fills). wandb stays
 # offline. The job name and end marker deliberately do NOT match
 # train_lt1.sbatch's DONE guard (swm-lt1-*.out / TRAIN_JOB_DONE).
 # Pace per size = (mtime ckpt_step40 - mtime ckpt_step20) / 20; memory in
@@ -26,7 +27,7 @@ cd $W
 export HF_HOME=$WORK/hf_cache PYTHONPATH=$W:$W/swm-next PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export WANDB_MODE=offline WANDB_DATA_DIR=$WORK/wandb_data
-n=$(ls $W/datasets_swm/lt_v1/units/b0_*_c[0-9].h5 2>/dev/null | wc -l)
+n=$(ls $W/datasets_swm/lt_v1/lt_v1_b0/units/b0_*_c[0-9].h5 2>/dev/null | wc -l)
 [ "$n" -ge 5 ] || { echo INIT_MISSING_LT_UNITS_have_$n; exit 1; }
 S=swm-next/swm_lora/train_lt1_smoke.yaml
 mkdir -p outputs_swm_lora
