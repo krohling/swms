@@ -1,0 +1,44 @@
+# LangTable trajectory-adapter warm-up for run lt1: the noscale recipe of
+# warmup_v3b.yaml on LangTable batch 0 (lt_v1_b0: 2,700 episodes, five tasks
+# in equal shares, k=8 eval-ladder uniform pick, labeled pick only).
+# LangTable actions are 2-D planar deltas, so the OGB projector (5-D actions)
+# cannot be reused. Same plateau-pick convention as warmup_v3a.yaml.
+#
+# Changes vs warmup_v3b.yaml, nothing else:
+#   action_dim, h5_paths
+#   action_range     replaces diffusion_ckpt: each LangTable task has its own
+#                    base policy, so one range serves all five (the union of
+#                    their action stats), in training and in the eval
+#   fixed_val_split  replaces val_frac: the training run's val episodes (54
+#                    per task, make_lt_split.py) stay unseen here too
+#   run_name, out_dir
+# Frames go in as stored, 640x360 (no image_size: the Qwen processor makes
+# 640x352 = 220 image tokens, 268 per example). Decided by the frame-size check
+# of 2026-11-26 on 400 stored cycles: the judge's "closer" label on frames
+# reduced to 448x252 agrees with the stored label less often than a same-size
+# rerun does (88.2% vs 91.7%), so the reduced size did not pass.
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 2                  # LangTable: planar end-effector deltas
+horizon: 16
+h5_paths:
+  - "datasets_swm/lt_v1/lt_v1_b0/units/b0_*_c[0-9].h5"
+action_range:                  # union of the five base policies' action stats
+  min: [-0.03322795033454895, -0.03476471081376076]
+  max: [0.03466081991791725, 0.03485218435525894]
+questions: planner
+fixed_val_split: swm-next/swm_lora/splits/lt_v1_b0_split.json
+micro_cycles: 2
+accum_cycles: 6                # eff 12 examples/step, as warmup_v3b
+learnable_scale: false         # winning noscale recipe: no scalar, tokens at 1x
+proj_hidden: 512
+traj_cumsum: true
+learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
+max_steps: 6000
+max_grad_norm: 1.0
+val_every: 50
+ckpt_every: 250
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: warmup-lt1-noscale
+out_dir: outputs_swm_lora/lt1_warmup

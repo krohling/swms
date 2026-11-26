@@ -17,7 +17,10 @@
 # layout of the m5 copy the relay from LARG fills). wandb stays
 # offline. The job name and end marker deliberately do NOT match
 # train_lt1.sbatch's DONE guard (swm-lt1-*.out / TRAIN_JOB_DONE).
-# Pace per size = (mtime ckpt_step40 - mtime ckpt_step20) / 20; memory in
+# Pace per size = (mtime resume_step40 - mtime resume_step20) / 20, from
+# pace_smokelt1_<size>_<job>.log: the trainer keeps only the two newest resume
+# states and the last one is written after the validation pass, so a sampler
+# records each state's mtime while it exists. Memory in
 # gpu_smokelt1_<size>_<job>.log.
 set -x
 W=$WORK/swm-followup/swms-lttrain
@@ -43,12 +46,15 @@ run() {  # <size tag>
   local g=$W/gpu_smokelt1_$1_$J.log
   nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader -l 15 > $g &
   local ns=$!
+  local p=$W/pace_smokelt1_$1_$J.log
+  ( while sleep 2; do stat -c '%Y %n' outputs_swm_lora/lt1_smoke_$1_$J/resume_step*.pt 2>/dev/null; done > $p ) &
+  local ps=$!
   date +%s
   $V/bin/python swm-next/swm_lora/train_exp1.py --config outputs_swm_lora/train_lt1_smoke_$1_$J.yaml --resume none
   local rc=$?
   date +%s
-  kill $ns
-  stat -c '%Y %n' outputs_swm_lora/lt1_smoke_$1_$J/ckpt_step* 2>/dev/null
+  kill $ns $ps
+  sort -u $p
   echo "SMOKE_RUN_$1 exit $rc peak $(sort -n $g | tail -n 1)"
   return $rc
 }

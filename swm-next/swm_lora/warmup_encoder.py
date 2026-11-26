@@ -19,6 +19,12 @@ degenerate tau->0 version of the same target).
 Fixed learning rate, no schedule: watch wandb for the loss plateau and pick a
 checkpoint (saved every ckpt_every steps); there is no automated stop.
 
+--resume auto (a warm-up longer than one job): continue from the newest
+ckpt_step* in out_dir at its step count, same wandb run. Only the projector
+is restored: the optimizer moments start fresh and the data order is reseeded
+(seed + start step), so a resumed warm-up is not bit-identical to an
+uninterrupted one. The default, --resume none, always starts at step 0.
+
 Usage:
   python swm-next/swm_lora/warmup_encoder.py --config swm-next/swm_lora/warmup_encoder.yaml
 """
@@ -96,6 +102,7 @@ def build_weight_fn(h5_paths, episodes, mode, bin_width=0.05):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
+    ap.add_argument("--resume", choices=["auto", "none"], default="none")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     cfg["h5_paths"] = expand_h5_paths(cfg["h5_paths"])
@@ -162,6 +169,22 @@ def main():
         model.projector.load_state_dict(torch.load(
             f"{cfg['init_projector']}/projector.pt", map_location=device))
         print(f"projector warm-started from {cfg['init_projector']}", flush=True)
+    start_step = 0
+    if args.resume == "auto":                     # newest readable checkpoint
+        saved = sorted((int(d[len("ckpt_step"):]) for d in os.listdir(out)
+                        if d.startswith("ckpt_step")
+                        and d[len("ckpt_step"):].isdigit()), reverse=True)
+        for s in saved:                           # a job killed mid-save can
+            try:                                  # leave a truncated file
+                sd = torch.load(f"{out}/ckpt_step{s}/projector.pt",
+                                map_location=device)
+            except Exception as e:
+                print(f"skipping {out}/ckpt_step{s}: {e!r}", flush=True)
+                continue
+            model.projector.load_state_dict(sd)
+            start_step = s
+            print(f"resumed projector from {out}/ckpt_step{s}", flush=True)
+            break
     params = model.trainable_parameters()
     print(f"trainable {sum(p.numel() for p in params)/1e6:.2f}M "
           f"(encoder only)", flush=True)
@@ -241,7 +264,7 @@ def main():
         return m
 
     model.model.train()
-    g = torch.Generator().manual_seed(cfg.get("seed", 0))
+    g = torch.Generator().manual_seed(cfg.get("seed", 0) + start_step)
     if sample_w is not None:
         sampler = WeightedRandomSampler(torch.as_tensor(sample_w),
                                         num_samples=len(train_ds),
@@ -252,7 +275,7 @@ def main():
         dl = DataLoader(train_ds, batch_size=mc, shuffle=True, generator=g,
                         collate_fn=collate_fn, num_workers=4, drop_last=True)
     it = iter(dl)
-    step = 0
+    step = start_step
     while step < max_steps:
         opt.zero_grad(set_to_none=True)
         acc = 0.0

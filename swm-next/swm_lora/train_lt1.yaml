@@ -1,0 +1,56 @@
+# LangTable run lt1 (Kevin 2026-11-25/26): exp6a's recipe on the first
+# LangTable training set, lt_v1 batches 0-4 = 13,500 episodes (2,700 per task,
+# five tasks in equal shares, one model), from datagen_lt.py: per decision the
+# task's base policy proposes 8 chunks on the eval's temperature ladder, one
+# is picked uniformly and labeled by the Qwen judge at lookahead 16.
+#
+# Changes vs train_exp6a.yaml, nothing else:
+#   action_dim       2 (planar end-effector deltas)
+#   h5_paths         the 250 unit files (50 of batch 0, 200 of batches 1-4)
+#   action_range     replaces diffusion_ckpt: one range for the five tasks'
+#                    policies (the union of their action stats)
+#   fixed_val_split  54 held-out episodes per task of batch 0 (make_lt_split.py)
+#   init_projector   the LangTable warm-up (warmup_lt1.yaml), plateau pick
+#   run_name, out_dir
+# Frames go in as stored, 640x360 (no image_size: the Qwen processor makes
+# 640x352 = 220 image tokens, 268 per example against exp6a's 112). Decided by
+# the frame-size check of 2026-11-26 (see warmup_lt1.yaml). If the sizing smoke
+# (smoke_lt1.sbatch) shows that 16 sequences per forward do not fit, use
+# micro_cycles 8 and accum_cycles 12 (the same 96 examples per step).
+# Sampling stays uniform (balance_labels off, as exp6a), although the touch
+# label is positive on only about 6% of cycles.
+# 7.7M draws over about 1.4M train examples is about 5 passes (exp6a: about 5).
+model_id: Qwen/Qwen3-VL-8B-Instruct
+action_dim: 2                  # LangTable: planar end-effector deltas
+horizon: 16
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_targets: all-linear       # q/k/v/o + gate/up/down (~45M trainable)
+h5_paths:
+  - "datasets_swm/lt_v1/lt_v1_b0/units/b0_*_c[0-9].h5"
+  - "datasets_swm/lt_v1/lt_v1_main/units/b[1-4]_*_c[0-9].h5"
+action_range:                  # union of the five base policies' action stats
+  min: [-0.03322795033454895, -0.03476471081376076]
+  max: [0.03466081991791725, 0.03485218435525894]
+questions: planner
+fixed_val_split: swm-next/swm_lora/splits/lt_v1_b0_split.json
+total_steps: 80367
+micro_cycles: 16
+accum_cycles: 6                # eff 96 examples/step
+learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
+proj_hidden: 512
+traj_cumsum: true
+init_projector: outputs_swm_lora/lt1_warmup/ckpt_step_PICK_AFTER_WARMUP
+learning_rate: 1.0e-4          # exp1b's value at this batch size
+warmup_frac: 0.03
+max_grad_norm: 1.0
+val_every: 1000
+val_max_lists: 2000
+ckpt_every: 1000
+resume_every: 500
+seed: 0
+device: cuda
+wandb_project: swm-lora
+run_name: lt1-v1x5-b96
+out_dir: outputs_swm_lora/lt1_full
