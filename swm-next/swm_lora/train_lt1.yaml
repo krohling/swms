@@ -43,7 +43,13 @@ accum_cycles: 6                # eff 96 examples/step
 learnable_scale: false         # fixed 1x tokens (exp1b/exp4 standard)
 proj_hidden: 512
 traj_cumsum: true
-init_projector: outputs_swm_lora/lt1_warmup/ckpt_step_PICK_AFTER_WARMUP
+init_projector: outputs_swm_lora/lt1_warmup/ckpt_step5000
+# ^ wu-lt1 (1173625 + 1173626, 6,000 steps) val-BCE argmin over saved ckpts:
+# 0.3435 @ 5000 (4000: 0.3449, 6000: 0.3471, 5250: 0.3474 — within noise).
+# Curve flat from ~3500 in a 0.345-0.356 band (7-pt mean 0.348 @ 4000,
+# 0.350 @ 5000, 0.351 at the end), so the extend-if-falling rule did NOT
+# trigger; no ext leg. Val = 200 lists spread over the five tasks, pos_frac
+# 0.185. Picked 2026-11-27.
 learning_rate: 1.0e-4          # exp1b's value at this batch size
 warmup_frac: 0.03
 max_grad_norm: 1.0
