@@ -11,6 +11,8 @@
 #                    their action stats), in training and in the eval
 #   fixed_val_split  replaces val_frac: the training run's val episodes (54
 #                    per task, make_lt_split.py) stay unseen here too
+#   val_spread       the 200 val lists are taken evenly over the val index:
+#                    its first 200 are two episodes of one task, no positives
 #   run_name, out_dir
 # Frames go in as stored, 640x360 (no image_size: the Qwen processor makes
 # 640x352 = 220 image tokens, 268 per example). Decided by the frame-size check
@@ -36,6 +38,7 @@ learning_rate: 1.0e-4          # FIXED — no schedule in warm-up
 max_steps: 6000
 max_grad_norm: 1.0
 val_every: 50
+val_spread: true               # all five tasks (36 to 42 lists each)
 ckpt_every: 250
 seed: 0
 device: cuda

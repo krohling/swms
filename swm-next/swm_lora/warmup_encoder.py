@@ -34,7 +34,7 @@ import os
 import numpy as np
 import torch
 import yaml
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -140,6 +140,14 @@ def main():
                               questions=qsel, image_size=isz)
         collate_fn = collate_cycles
     print(f"train lists: {len(train_ds):,}  val lists: {len(val_ds):,}", flush=True)
+    # lt1: the val index is sorted by file, so by task, and val_pass reads its
+    # first val_max_lists entries: one task's first episodes. val_spread takes
+    # the same number evenly over the whole index instead.
+    if cfg.get("val_spread", False):
+        n_val = min(len(val_ds), int(cfg.get("val_max_lists", 200)))
+        val_ds = Subset(val_ds, np.linspace(
+            0, len(val_ds) - 1, n_val).astype(int).tolist())
+        print(f"val spread: {n_val:,} lists over the whole val index", flush=True)
     # exp5: per-question 50/50 class balancing (Jacob's dataset recipe) for
     # sparse-positive data; pointwise objective only. Draws with replacement,
     # len(train_ds) per epoch, so step counts are unchanged.

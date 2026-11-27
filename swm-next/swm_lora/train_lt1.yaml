@@ -11,6 +11,8 @@
 #                    policies (the union of their action stats)
 #   fixed_val_split  54 held-out episodes per task of batch 0 (make_lt_split.py)
 #   init_projector   the LangTable warm-up (warmup_lt1.yaml), plateau pick
+#   val_spread       the 2,000 val lists are taken evenly over the val index:
+#                    its first 2,000 are 18 episodes of one task
 #   run_name, out_dir
 # Frames go in as stored, 640x360 (no image_size: the Qwen processor makes
 # 640x352 = 220 image tokens, 268 per example against exp6a's 112). Decided by
@@ -47,6 +49,7 @@ warmup_frac: 0.03
 max_grad_norm: 1.0
 val_every: 1000
 val_max_lists: 2000
+val_spread: true               # all five tasks, 268 of the 270 val episodes
 ckpt_every: 1000
 resume_every: 500
 seed: 0
